@@ -3,9 +3,9 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
         id, pos, tier, typeStr, hexID = '0000'
         battery = 100.0
         isAwake = true
-        offset = 0
+        offset = randi(WSN_Config.HelloInterval) - 1;
         txPower = 2.0
-
+        radio
         neighborTable = []
         parent = []
         children = []
@@ -15,6 +15,9 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
 
         % --- PROTOCOL ---
         multicastGroups = []   % e.g. [hex2dec('FF00')]
+        
+        % --- PHASE 2: HELLO BURST ---
+        nextHelloBurst = 0;   % Scheduled time for next Hello burst
     end
 
     methods
@@ -25,7 +28,11 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
             obj.pos = pos;
             obj.tier = tier;
             obj.hexID = '0000';
-
+            obj.radio = WSN_Radio(obj);
+            obj.offset = randi(WSN_Config.HelloInterval) - 1;
+            % Initialize nextHelloBurst: schedule first burst at startup (BootSteps - 1) with jitter
+            obj.nextHelloBurst = 0 + WSN_Config.HelloBurstInterval + ...
+                randi(2 * WSN_Config.HelloBurstJitter + 1) - WSN_Config.HelloBurstJitter - 1;
             switch tier
                 case 0, obj.typeStr = 'SINK';
                 case 1, obj.typeStr = 'GWN';
@@ -35,13 +42,14 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
 
             obj.neighborTable = struct( ...
                 'id',{},'lastSeen',{},'rssi',{}, ...
-                'trust',{},'commRange',{},'status',{});
+                'trust',{},'commRange',{},'status',{}, ...
+                'tier',{},'battery',{},'neighborCount',{},'isVerified',{});
         end
         function logTx(obj, msg, t)
             txt = sprintf('t=%d [TX] type=%d sub=%d → %s',t, msg.type, msg.subtype, obj.fmtID(msg.dst));
             obj.addLog( ...
-                sprintf('t=%d [TX] %s → %s', ...
-                    t, msg.getTypeStr(), obj.fmtID(msg.dst)), ...
+                sprintf('t=%d [TX] %s.%d → %s', ...
+                t, msg.getTypeStr(), msg.subtype, obj.fmtID(msg.dst)), ...
                 msg, ...
                 t);
 
@@ -70,7 +78,7 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
         end
 
 
-        
+
         % --------------------------------------------------
         % PHYSICS (unchanged)
         % --------------------------------------------------
@@ -102,8 +110,8 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
                 return;
             end
 
-            % RX energy
-            obj.battery = max(0, obj.battery - 0.01);
+            % % RX energy
+            % obj.battery = max(0, obj.battery - 0.01);
 
             % TTL check (future)
             if isprop(msg,'ttl') && msg.ttl <= 0
@@ -152,6 +160,36 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
             if nargin >= 4 && ~isempty(msg)
                 WSN_GUI_GlobalEventBus.emit(t, msg);
             end
+        end
+        
+        function msg = createHelloMessage(obj, t)
+            % Create Phase 2 Hello message (Type 0, broadcast)
+            % Payload: Tier (u4) | Battery (u4) | NeighborCount (u8)
+            
+            % Battery as nibble (0-15, where 15=100%, 0=0%)
+            batNib = min(15, floor(obj.battery / 7));
+            % Num neighbours capped at 255
+            numNbr = min(255, numel(obj.neighborTable));
+            
+            % Create message with Type 0, broadcast address 0xFFFF
+            msg = WSN_Message(WSN_Config.MSG_TYPE_HELLO, hex2dec(obj.hexID), hex2dec('FFFF'), []);
+            msg.subtype = uint8(0);
+            msg.flag = uint8(0);  % Not encrypted
+            
+            % Set verified flag if this node is verified
+            if isprop(obj, 'isVerified') && obj.isVerified
+                msg.setVerified(true);
+            end
+            
+            msg.setHelloPayload(obj.tier, batNib, numNbr);
+            msg.addChecksum();
+        end
+        
+        function scheduleNextHelloBurst(obj, t)
+            % Schedule next Hello burst at t + interval ± jitter
+            interval = WSN_Config.HelloBurstInterval;
+            jitter = randi(2 * WSN_Config.HelloBurstJitter + 1) - WSN_Config.HelloBurstJitter - 1;
+            obj.nextHelloBurst = t + interval + jitter;
         end
 
     end

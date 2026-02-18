@@ -1,0 +1,6 @@
+HexID,Parent,Route,LocalKey,CHCount,SNCount,GWChildren,CHChildren,SecondaryChildren,LastUpdate
+FF0C,FF05,"FF05 -> FF0C",A708107709CF4F3C,0,0,[],[],[],29
+FF02,FF05,"FF05 -> FF02",A908107709CF4F3C,0,0,[],[],[],38
+AA08,FF0A,"FF0A -> AA08",,0,0,[],[],[],250
+AA0C,FF0D,"FF0D -> AA0C",,0,0,[],[],[],251
+AA0B,FF0D,"FF0D -> AA0B",,0,0,[],[],[],255

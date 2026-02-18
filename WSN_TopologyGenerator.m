@@ -39,7 +39,7 @@ classdef WSN_TopologyGenerator
 
             % ---------- FINAL TARGET COUNTS ----------
             targetGWNs = round(N * (0.12 + 0.03*rand()));   % 12–15%
-            targetCHs  = round(N * (0.05 + 0.03*rand()));   % 5–8%
+            targetCHs  = round(N * (0.06 + 0.04*rand()));   % 6–10% (+10% more CHs)
             numSensors = N;
 
             % ---------- THROW EXTRA GWNs (BUFFERED) ----------

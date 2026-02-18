@@ -19,6 +19,7 @@ classdef WSN_GUI < handle
 
 
             obj.controlDeck = WSN_GUI_ControlDeck(obj.tabTopo, nodes);
+            obj.controlDeck.setGlobalEventFeed(obj.eventFeed);  % Pass reference for CSV export
             obj.networkState = WSN_GUI_NetworkState(obj.tabTopo);
             obj.sinkAnalytics = WSN_GUI_SinkAnalytics(obj.tabSink); 
             

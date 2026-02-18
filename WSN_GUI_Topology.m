@@ -17,15 +17,21 @@ classdef WSN_GUI_Topology < handle
         function updateCircles(obj, n)
             if isempty(n), return; end
             if isvalid(obj.rangeCirc)
-                pwr = n.txPower; if pwr < 0.1, pwr = 1.0; end
-                rng = ((pwr*100)/0.15)^(1/2.4);
+                % Standard node: use txPower and standard pathLossExp
+                pwr = n.txPower; 
+                if pwr < 0.1, pwr = 1.0; end
+                plExp = WSN_Config.PathLossExp;  % 2.4
+                rng = ((pwr*100)/WSN_Config.Sensitivity)^(1/plExp);
                 set(obj.rangeCirc, 'Position', [n.pos(1)-rng, n.pos(2)-rng, 2*rng, 2*rng], ...
                     'Curvature', [1 1], 'EdgeColor', 'r', 'LineStyle', '--', 'LineWidth', 1, 'Visible', 'on');
             end
-            if n.tier == 3 && n.state < 1
+            % Control circle: GWN backbone range (always visible)
+            if n.tier == 3
                 if isprop(n, 'controlPower')
                     cp = n.controlPower;
-                    rngC = ((cp*100)/0.15)^(1/2.4);
+                    % GWN-to-GWN uses backbone pathLossExp (1.5)
+                    plExp = WSN_Config.PathLossExp_Backbone;  % 1.5
+                    rngC = ((cp*100)/WSN_Config.Sensitivity)^(1/plExp);
                     set(obj.controlCirc, 'Position', [n.pos(1)-rngC, n.pos(2)-rngC, 2*rngC, 2*rngC], ...
                         'Curvature', [1 1], 'EdgeColor', 'm', 'LineStyle', '-', 'LineWidth', 0.5, 'Visible', 'on');
                 end
@@ -42,6 +48,24 @@ classdef WSN_GUI_Topology < handle
             
             obj.rangeCirc = rectangle(obj.ax, 'Position', [0,0,0,0], 'Visible', 'off');
             obj.controlCirc = rectangle(obj.ax, 'Position', [0,0,0,0], 'Visible', 'off');
+            
+            % Count nodes in TX phase for title
+            txCount = 0;
+            rxCount = 0;
+            for k = 1:numel(nodes)
+                if isprop(nodes(k), 'currentPhase')
+                    if nodes(k).currentPhase == WSN_Config.PHASE_TX
+                        txCount = txCount + 1;
+                    elseif nodes(k).currentPhase == WSN_Config.PHASE_RX
+                        rxCount = rxCount + 1;
+                    end
+                end
+            end
+            if txCount > 0 || rxCount > 0
+                title(obj.ax, sprintf('Topology: Green=Secure, Gold=TX(%d), Cyan=RX(%d)', txCount, rxCount), 'FontSize', 10);
+            else
+                title(obj.ax, 'Topology: Green=Secure Tree, Pink=Negotiating', 'FontSize', 10);
+            end
 
             for k = 1:numel(nodes)
                 n = nodes(k);
@@ -69,13 +93,29 @@ classdef WSN_GUI_Topology < handle
                 end
                 
                 % --- GREEN LINE LOGIC (Secure Tree) ---
-                if ~isempty(n.parent)
+                % Skip sensors (tier 1) - they only show blue TX lines
+                if ~isempty(n.parent) && n.tier ~= 1
                     pIdx = id2idx(n.parent);
                     if ~isempty(pIdx)
+                        % Determine link color based on node types
+                        parentNode = nodes(pIdx);
+                        if n.tier == 2 && parentNode.tier == 3
+                            % CH (tier 2) -> GWN (tier 3): Light Green (visible)
+                            linkColor = [0.5 0.9 0.5];
+                            linkWidth = 1.8;
+                        elseif n.tier == 2 && parentNode.tier == 2
+                            % CH (tier 2) -> CH (tier 2): Green-Yellow (visible)
+                            linkColor = [0.6 0.85 0.3];
+                            linkWidth = 1.5;
+                        else
+                            % GWN-GWN or GWN-Sink: Standard bright green
+                            linkColor = [0 0.8 0];
+                            linkWidth = 2;
+                        end
                         plot(obj.ax, ...
                             [n.pos(1) nodes(pIdx).pos(1)], ...
                             [n.pos(2) nodes(pIdx).pos(2)], ...
-                            'Color', [0 0.8 0], 'LineWidth', 2);
+                            'Color', linkColor, 'LineWidth', linkWidth);
                     end
                 end
 
@@ -84,7 +124,29 @@ classdef WSN_GUI_Topology < handle
             for k = 1:numel(nodes)
                 n = nodes(k); 
                 faceCol='none'; edgeCol=[0 0.7 0]; lw=1.5; sz=40; 
-                if n.tier==3, faceCol=[0 1 0]; edgeCol='k'; if isa(n,'WSN_Sink'), edgeCol='b'; lw=2; end; end
+                
+                % Check for phase state first (override other colors for GWNs)
+                if isprop(n, 'currentPhase') && isprop(n, 'phaseInherited') && n.phaseInherited
+                    if n.currentPhase == WSN_Config.PHASE_TX
+                        faceCol = [1 0.84 0];    % Gold for TX phase
+                        edgeCol = [1 0.5 0];     % Orange edge
+                        lw = 3.0;
+                        sz = 55;                 % Slightly larger
+                    elseif n.currentPhase == WSN_Config.PHASE_RX
+                        faceCol = [0 0.9 0.9];   % Cyan for RX phase
+                        edgeCol = [0 0.6 0.6];   % Teal edge
+                        lw = 2.5;
+                        sz = 50;
+                    else
+                        % PHASE_IDLE or default
+                        faceCol = [0 1 0];       % Green for IDLE/Secure
+                        edgeCol = 'k';
+                    end
+                    if isa(n,'WSN_Sink'), edgeCol='b'; lw=2; end
+                elseif n.tier==3
+                    faceCol=[0 1 0]; edgeCol='k'; 
+                    if isa(n,'WSN_Sink'), edgeCol='b'; lw=2; end
+                end
                 if n.tier==2, faceCol=[0.6 0 0.8]; edgeCol='k'; end
                 if k == selectedID, edgeCol = 'm'; lw = 2.5; end
                 scatter(obj.ax, n.pos(1), n.pos(2), sz, 'MarkerFaceColor', faceCol, 'MarkerEdgeColor', edgeCol, 'LineWidth', lw);
@@ -101,26 +163,28 @@ classdef WSN_GUI_Topology < handle
                 vl = visualLines(k);
                 if vl.expiry < t, continue; end
 
-                % ---------- COLOR SANITIZATION ----------
-                % NEVER allow default black
+                % ---------- COLOR & STYLE BY MESSAGE TYPE ----------
                 col = vl.color;
+                lw = 1;
+                ls = '-';
 
                 if isempty(col) || isequal(col, 'k') || isequal(col, [0 0 0])
-                    % Default fallback = HEARTBEAT
-                    col = [1 0.4 0.7];   % pink
+                    % Default fallback = HEARTBEAT (pink, thin)
+                    col = [1 0.4 0.7];
                     lw  = 0.5;
                     ls  = '-';
-                else
-                    lw = 1;
+                elseif isequal(col, [0.3 0.5 1.0])
+                    % Type 1 Sensor: thin blue solid
+                    lw = 0.5;
                     ls = '-';
-                end
-
-                % Respect explicit width/style if present
-                if isfield(vl, 'width') && ~isempty(vl.width)
-                    lw = vl.width;
-                end
-                if isfield(vl, 'style') && ~isempty(vl.style)
-                    ls = vl.style;
+                elseif isequal(col, [0.6 0.2 0.8])
+                    % 5.2 SENSOR_AGG: violet dashed
+                    lw = 1.0;
+                    ls = '--';
+                elseif isequal(col, [1.0 0.7 0.2])
+                    % 5.3 AGG_ACK: amber dashed
+                    lw = 0.8;
+                    ls = '--';
                 end
 
                 plot(obj.ax, ...
