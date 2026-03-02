@@ -1,3 +1,5 @@
+%   % Suppress unused variable warnings - defensive initializations
+%   % Suppress unused input argument warnings - API consistency
 classdef WSN_ClusterHead < WSN_Node
     properties
         % --- FSM STATE ---
@@ -14,6 +16,11 @@ classdef WSN_ClusterHead < WSN_Node
         rejectedCHs = []               % List of CHs that rejected
         retryBackoff = 0               % Randomized backoff timer (2-5 timeframes)
         
+        % --- DYNAMIC VOLTAGE SCALING (DVS) ---
+        dvsScaleCount = 0              % Number of times power has been scaled up
+        dvsOriginalPower = 0           % Original TX power before scaling
+        dvsAllExhaustedOnce = false    % Flag: all neighbors exhausted at least once
+        
         % --- SENSOR DATA AGGREGATION ---
         sensorTable = struct('id',{}, 'lastTime',{}, 'value',{}, 'rssi',{}, 'battery',{})
         aggPeriod = 0                  % Fixed random period 7-10 TFs (set after verification)
@@ -23,6 +30,10 @@ classdef WSN_ClusterHead < WSN_Node
         aggRetryCount = 0              % Retry count for pending 5.2
         lastAggRetryTime = 0           % Last retry time for 5.2
         pendingFragments = []          % Array of fragment indices awaiting ACK
+        
+        % --- PANIC QUEUE (High Priority) ---
+        panicQueue = []                % Queue of panic messages to forward (priority)
+        seenPanicUIDs = []             % UIDs of already-processed panic messages
     end
     
     methods
@@ -31,6 +42,7 @@ classdef WSN_ClusterHead < WSN_Node
             obj@WSN_Node(id, pos, WSN_Config.TIER_CH);
             obj.typeStr = 'CH';
             obj.txPower = WSN_Config.TxPower_CH;
+            obj.dvsOriginalPower = WSN_Config.TxPower_CH;  % Store original power
             obj.state = WSN_Config.STATE_BOOT;
         end
         
@@ -43,6 +55,59 @@ classdef WSN_ClusterHead < WSN_Node
         
         function msgs = step(obj, t, ~, ~)
             msgs = [];
+            
+            % === ATTACK: FLOODING (Hello Flood) ===
+            % Malicious CH broadcasts excessive ADV-CH messages with inflated TX power
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_FLOODING
+                floodCount = WSN_Attack.getFloodingBurstCount(obj.id, t);
+                if floodCount > 0
+                    % Temporarily inflate TX power for flooding
+                    originalPower = obj.txPower;
+                    obj.txPower = WSN_Attack.getFloodingTxPower(obj.id);
+                    
+                    % Broadcast multiple ADV-CH messages
+                    for fi = 1:floodCount
+                        floodMsg = obj.createHelloMessage(t);
+                        floodMsg.uid = randi(1e9);  % Unique ID per flood message
+                        msgs = [msgs, floodMsg];
+                        obj.addLog(sprintf('t=%d [HELLO_TX] bat=%d%% nbr=%d', ...
+                            t, uint8(obj.battery), numel(obj.neighborTable)));
+                    end
+                    
+                    % Restore original power
+                    obj.txPower = originalPower;
+                end
+            end
+            
+            % === ATTACK: PANIC FLOOD (Sinkhole Variant) ===
+            % Malicious node broadcasts fake emergency alerts with inflated route metrics
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_PANIC_FLOOD
+                if WSN_Attack.shouldPanicFlood(obj.id, t)
+                    panicMsg = WSN_Attack.createFakePanicBeacon(obj.id, obj.hexID, t);
+                    if ~isempty(panicMsg)
+                        msgs = [msgs, panicMsg];
+                        obj.addLog(sprintf('t=%d [PANIC_TX] type=%d sev=%d', ...
+                            t, panicMsg.subtype, 2));
+                    end
+                end
+            end
+            
+            % === ATTACK: DENIAL OF SLEEP ===
+            % Send spurious packets to prevent target nodes from sleeping
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_DENIAL_SLEEP
+                targets = WSN_Attack.getDenialOfSleepTargets(obj.id, obj.neighborTable, t);
+                for ti = 1:numel(targets)
+                    spamMsg = WSN_Attack.createSpuriousPacket(hex2dec(obj.hexID), targets(ti), t);
+                    msgs = [msgs, spamMsg];
+                    obj.addLog(sprintf('t=%d [TX] type=%d.%d -> %s', ...
+                        t, spamMsg.type, spamMsg.subtype, dec2hex(uint16(targets(ti)), 4)));
+                    % Track for double-line visual
+                    WSN_Attack.addDoSTarget(obj.id, targets(ti), t + 5);
+                end
+            end
             
             % --- PHASE 2: HELLO BURST ---
             if t >= 0 && t == obj.nextHelloBurst
@@ -120,6 +185,38 @@ classdef WSN_ClusterHead < WSN_Node
                             % No more GWNs, try CHs
                             target = obj.findBestVerifiedCH();
                             if isempty(target)
+                                % === DYNAMIC VOLTAGE SCALING (DVS) ===
+                                % All verified neighbors exhausted - attempt power scale-up
+                                if WSN_Config.CH_DVS_ENABLED && ...
+                                   obj.dvsScaleCount < WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS
+                                    % Scale up power
+                                    newPower = min(obj.txPower * WSN_Config.CH_DVS_SCALE_FACTOR, ...
+                                                   WSN_Config.CH_DVS_MAX_POWER);
+                                    
+                                    if newPower > obj.txPower
+                                        obj.txPower = newPower;
+                                        obj.dvsScaleCount = obj.dvsScaleCount + 1;
+                                        obj.dvsAllExhaustedOnce = true;
+                                        
+                                        % Reset rejected lists - allow retry on all neighbors
+                                        obj.rejectedGWNs = [];
+                                        obj.rejectedCHs = [];
+                                        
+                                        obj.addLog(sprintf('t=%d [DVS] Power scaled to %.1f (attempt %d/%d) - retrying all neighbors', ...
+                                            t, obj.txPower, obj.dvsScaleCount, WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS));
+                                        
+                                        % Set backoff before retry
+                                        obj.retryBackoff = randi([3 7]);
+                                        return;
+                                    end
+                                elseif obj.dvsScaleCount >= WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS
+                                    % Max DVS attempts reached - enter DORMANT state
+                                    if obj.state ~= WSN_Config.STATE_DORMANT
+                                        obj.state = WSN_Config.STATE_DORMANT;
+                                        obj.addLog(sprintf('t=%d [DVS_EXHAUSTED] Max scale attempts (%d) reached - entering DORMANT', ...
+                                            t, WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS));
+                                    end
+                                end
                                 return;  % No targets available
                             end
                         end
@@ -179,6 +276,14 @@ classdef WSN_ClusterHead < WSN_Node
             if msg.type == 0 && isBroadcast && msg.verifyChecksum()
                 obj.handleHelloReception(msg, t, rssi);
                 return;
+            end
+            
+            % --- PANIC MESSAGE (Type 2) - HIGH PRIORITY ---
+            if msg.type == WSN_Config.MSG_TYPE_PANIC && msg.verifyChecksum()
+                if isBroadcast || isForMe
+                    response = obj.handlePanicMessage(msg, t, rssi);
+                    return;
+                end
             end
             
             % --- SENSOR DATA (Type 1) - Process if for me ---
@@ -591,7 +696,7 @@ classdef WSN_ClusterHead < WSN_Node
             if isempty(idx)
                 obj.neighborTable(end+1) = struct( ...
                     'id', sender, 'lastSeen', t, 'rssi', rssi, ...
-                    'trust', 20, 'commRange', 0, 'status', 0, ...
+                    'TrustScore', 50, 'commRange', 0, 'status', 0, ...
                     'tier', tier, 'battery', battery, 'neighborCount', neighborCount, ...
                     'isVerified', senderVerified);
                 % Local log only for NEW neighbors
@@ -659,6 +764,33 @@ classdef WSN_ClusterHead < WSN_Node
             % Must have parent to send to
             if isempty(obj.parent)
                 return;
+            end
+            
+            % === ATTACK: BLACKHOLE/GRAYHOLE CHECK ===
+            % Malicious CH may drop data packets instead of forwarding
+            if WSN_Attack.isMaliciousNode(obj.id)
+                attackType = WSN_Attack.getAttackType(obj.id);
+                if attackType == WSN_Attack.ATTACK_BLACKHOLE
+                    if WSN_Attack.shouldDropBlackhole(obj.id, t)
+                        % Add ghost link to parent (dropped aggregation)
+                        if ~isempty(obj.parent)
+                            WSN_Attack.addGhostLink(obj.id, obj.parent, t + 3, 'AGG');
+                        end
+                        % Silently drop - no TX logged means no forward happened
+                        obj.sensorTable = struct('id',{}, 'lastTime',{}, 'value',{}, 'rssi',{}, 'battery',{});
+                        return;  % Drop all - forward nothing
+                    end
+                elseif attackType == WSN_Attack.ATTACK_GRAYHOLE
+                    if WSN_Attack.shouldDropGrayhole(obj.id, t)
+                        % Add ghost link to parent (dropped aggregation)
+                        if ~isempty(obj.parent)
+                            WSN_Attack.addGhostLink(obj.id, obj.parent, t + 3, 'AGG');
+                        end
+                        % Silently drop - no TX logged means no forward happened
+                        obj.sensorTable = struct('id',{}, 'lastTime',{}, 'value',{}, 'rssi',{}, 'battery',{});
+                        return;  % Drop this batch
+                    end
+                end
             end
             
             % Initialize aggregation period on first call
@@ -743,7 +875,7 @@ classdef WSN_ClusterHead < WSN_Node
                         typecast(uint16(s.value), 'uint8'), ...     % 2 bytes
                         uint8(round(s.rssi * 10)), ...              % 1 byte (scaled)
                         uint8(s.battery)];                          % 1 byte
-                    payload = [payload, sensorEntry]; %#ok<AGROW>
+                    payload = [payload, sensorEntry]; %
                 end
                 
                 msg.payload = payload;
@@ -760,7 +892,7 @@ classdef WSN_ClusterHead < WSN_Node
                 msg.addChecksum();
                 msg.color = [0.6 0.2 0.8];  % Violet for 5.2 SENSOR_AGG
                 
-                msgs = [msgs, msg]; %#ok<AGROW>
+                msgs = [msgs, msg]; %
                 
                 obj.addLog(sprintf('t=%d [5.2_FRAG] Fragment %d/%d: %d sensors', ...
                     t, fragIdx, numFragments, numel(fragSensors)));
@@ -783,6 +915,45 @@ classdef WSN_ClusterHead < WSN_Node
             % 5.2 SENSOR_AGG from child CH - ACK and forward
             response = [];
             sender = msg.src;
+            
+            % === ATTACK: BLACKHOLE/GRAYHOLE on relay ===
+            % Malicious CH may refuse to relay child CH data
+            if WSN_Attack.isMaliciousNode(obj.id)
+                attackType = WSN_Attack.getAttackType(obj.id);
+                if attackType == WSN_Attack.ATTACK_BLACKHOLE
+                    if WSN_Attack.shouldDropBlackhole(obj.id, t)
+                        % Add ghost link to parent (dropped relay)
+                        if ~isempty(obj.parent)
+                            WSN_Attack.addGhostLink(obj.id, obj.parent, t + 3, 'RELAY');
+                        end
+                        % Log RX, send ACK (appears normal), but no forward
+                        obj.addLog(sprintf('t=%d [RX] 5.2_AGG <- %s', t, dec2hex(uint16(sender), 4)));
+                        totalFrags = 1; fragIdx = 1;
+                        if msg.payloadLen >= 2
+                            totalFrags = msg.payload(1); fragIdx = msg.payload(2);
+                        end
+                        response = obj.createAggACK(sender, msg.seq, t, fragIdx, totalFrags);
+                        obj.addLog(sprintf('t=%d [TX] 5.2_ACK -> %s', t, dec2hex(uint16(sender), 4)));
+                        return;  % ACK but don't merge/forward
+                    end
+                elseif attackType == WSN_Attack.ATTACK_GRAYHOLE
+                    if WSN_Attack.shouldDropGrayhole(obj.id, t)
+                        % Add ghost link to parent (dropped relay)
+                        if ~isempty(obj.parent)
+                            WSN_Attack.addGhostLink(obj.id, obj.parent, t + 3, 'RELAY');
+                        end
+                        % Log RX, send ACK (appears normal), but no forward
+                        obj.addLog(sprintf('t=%d [RX] 5.2_AGG <- %s', t, dec2hex(uint16(sender), 4)));
+                        totalFrags = 1; fragIdx = 1;
+                        if msg.payloadLen >= 2
+                            totalFrags = msg.payload(1); fragIdx = msg.payload(2);
+                        end
+                        response = obj.createAggACK(sender, msg.seq, t, fragIdx, totalFrags);
+                        obj.addLog(sprintf('t=%d [TX] 5.2_ACK -> %s', t, dec2hex(uint16(sender), 4)));
+                        return;  % ACK but don't merge/forward
+                    end
+                end
+            end
             
             % Extract fragment info from payload
             totalFrags = 1;
@@ -907,6 +1078,101 @@ classdef WSN_ClusterHead < WSN_Node
             msg.payloadLen = numel(payload);
             msg.addChecksum();
             msg.color = [1.0 0.7 0.2];  % Amber for 5.3 AGG_ACK
+        end
+        
+        % =====================================================
+        % PANIC MESSAGE HANDLING (Type 2) - HIGH PRIORITY
+        % =====================================================
+        function response = handlePanicMessage(obj, msg, t, rssi)
+            % Handle incoming panic message with high priority
+            % CHs aggregate panic information and forward to parent/sink
+            response = [];
+            sender = msg.src;
+            
+            % Check if already seen this panic (deduplication by UID)
+            if ismember(msg.uid, obj.seenPanicUIDs)
+                return;  % Already processed
+            end
+            obj.seenPanicUIDs = [obj.seenPanicUIDs, msg.uid];
+            
+            % Prune old UIDs (keep last 100)
+            if numel(obj.seenPanicUIDs) > 100
+                obj.seenPanicUIDs = obj.seenPanicUIDs(end-99:end);
+            end
+            
+            % Check TTL
+            if msg.ttl <= 0
+                obj.addLog(sprintf('t=%d [PANIC_DROP] TTL expired from %s', ...
+                    t, dec2hex(uint16(sender), 4)));
+                return;
+            end
+            
+            % Extract panic info from payload
+            panicType = msg.subtype;
+            severity = msg.prio;
+            originalSrc = sender;
+            sensorValue = 0;
+            
+            if msg.payloadLen >= 4
+                originalSrc = typecast(msg.payload(1:2), 'uint16');
+                sensorValue = typecast(msg.payload(3:4), 'uint16');
+            end
+            
+            % Log panic reception with priority
+            panicTypeStr = obj.getPanicTypeStr(panicType);
+            obj.addLog(sprintf('t=%d [PANIC_RX] *** %s *** sev=%d from=%s orig=%s val=%d', ...
+                t, panicTypeStr, severity, dec2hex(uint16(sender), 4), ...
+                dec2hex(uint16(originalSrc), 4), sensorValue));
+            
+            % Forward to parent with high priority
+            if ~isempty(obj.parent)
+                fwdMsg = obj.createPanicForward(msg);
+                response = fwdMsg;
+                obj.addLog(sprintf('t=%d [PANIC_FWD] -> parent %s (TTL=%d)', ...
+                    t, dec2hex(uint16(obj.parent), 4), fwdMsg.ttl));
+            elseif severity >= WSN_Config.PANIC_SEV_HIGH
+                % No parent but high severity - broadcast to find route
+                fwdMsg = obj.createPanicForward(msg);
+                fwdMsg.dst = [];  % Broadcast
+                response = fwdMsg;
+                obj.addLog(sprintf('t=%d [PANIC_FWD] -> broadcast (orphan, TTL=%d)', t, fwdMsg.ttl));
+            end
+        end
+        
+        function fwdMsg = createPanicForward(obj, origMsg)
+            % Create forwarded panic message with decremented TTL
+            fwdMsg = WSN_Message();
+            fwdMsg.type = WSN_Config.MSG_TYPE_PANIC;
+            fwdMsg.subtype = origMsg.subtype;
+            fwdMsg.src = hex2dec(obj.hexID);  % CH is now the forwarder
+            fwdMsg.dst = obj.parent;           % Forward to parent
+            fwdMsg.ttl = origMsg.ttl - 1;      % Decrement TTL
+            fwdMsg.prio = origMsg.prio;        % Preserve priority
+            fwdMsg.seq = origMsg.seq;
+            fwdMsg.uid = origMsg.uid;          % Preserve UID for deduplication
+            
+            % Copy payload (contains original sender + data)
+            fwdMsg.payload = origMsg.payload;
+            fwdMsg.payloadLen = origMsg.payloadLen;
+            
+            fwdMsg.addChecksum();
+            fwdMsg.color = [1.0 0.2 0.2];  % Red for panic
+        end
+        
+        function str = getPanicTypeStr(~, panicType)
+            % Get human-readable panic type string
+            switch panicType
+                case WSN_Config.PANIC_SUB_ANOMALY
+                    str = 'ANOMALY';
+                case WSN_Config.PANIC_SUB_BATTERY_CRIT
+                    str = 'BATTERY_CRITICAL';
+                case WSN_Config.PANIC_SUB_INTRUSION
+                    str = 'INTRUSION';
+                case WSN_Config.PANIC_SUB_LINK_LOSS
+                    str = 'LINK_LOSS';
+                otherwise
+                    str = sprintf('PANIC_%d', panicType);
+            end
         end
     end
 end

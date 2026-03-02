@@ -2,13 +2,80 @@ classdef WSN_TopologyGenerator
     methods (Static)
 
         % =====================================================
+        % POISSON DISK SAMPLING (EVEN DISTRIBUTION)
+        % =====================================================
+        function positions = distributePoissonDisk(hullX, hullY, numPoints, field)
+            % Distribute numPoints evenly inside polygon using grid + randomness
+            % Combines grid-based init with Poisson disk refinement
+            
+            % Calculate bounding box of hull
+            minX = max(1, floor(min(hullX))); maxX = min(field(1), ceil(max(hullX)));
+            minY = max(1, floor(min(hullY))); maxY = min(field(2), ceil(max(hullY)));
+            
+            % Grid cell size based on target point density
+            cellSize = sqrt((maxX-minX) * (maxY-minY) / max(1, numPoints)) * 0.8;
+            cellSize = max(2, cellSize);
+            
+            % Create candidate grid points
+            gridPoints = [];
+            for x = minX:cellSize:maxX
+                for y = minY:cellSize:maxY
+                    % Add grid point with random offset
+                    offset = (cellSize/3) * (rand(1,2) - 0.5);
+                    cand = [x + offset(1), y + offset(2)];
+                    if all(cand >= 1) && all(cand <= field) && ...
+                       inpolygon(cand(1), cand(2), hullX, hullY)
+                        gridPoints = [gridPoints; cand]; %
+                    end
+                end
+            end
+            
+            % If we have more grid points than needed, select uniformly spaced subset
+            if size(gridPoints, 1) > numPoints
+                % Use stratified sampling for even distribution
+                [~, indices] = sort(rand(size(gridPoints,1), 1));
+                indices = indices(1:numPoints);
+                positions = gridPoints(indices, :);
+            elseif size(gridPoints, 1) == numPoints
+                positions = gridPoints;
+            else
+                % Not enough grid points - fill with random placement
+                positions = gridPoints;
+                remaining = numPoints - size(gridPoints, 1);
+                for r = 1:remaining
+                    placed = false;
+                    attempts = 0;
+                    while ~placed && attempts < 50
+                        cand = rand(1,2) .* [maxX-minX, maxY-minY] + [minX, minY];
+                        if inpolygon(cand(1), cand(2), hullX, hullY)
+                            % Check minimum distance to existing points
+                            dists = vecnorm(positions - cand, 2, 2);
+                            if all(dists > cellSize/2)
+                                positions = [positions; cand]; %
+                                placed = true;
+                            end
+                        end
+                        attempts = attempts + 1;
+                    end
+                    if ~placed && size(positions,1) < numPoints
+                        % Force placement if still needed
+                        cand = rand(1,2) .* [maxX-minX, maxY-minY] + [minX, minY];
+                        if inpolygon(cand(1), cand(2), hullX, hullY)
+                            positions = [positions; cand]; %
+                        end
+                    end
+                end
+            end
+        end
+
+        % =====================================================
         % GUI HULL (UNCHANGED)
         % =====================================================
         function hullCoords = getGWNHull(nodes)
             gwnPos = [];
             for i = 1:numel(nodes)
                 if isprop(nodes(i),'tier') && nodes(i).tier == WSN_Config.TIER_GWN
-                    gwnPos(end+1,:) = nodes(i).pos; %#ok<AGROW>
+                    gwnPos(end+1,:) = nodes(i).pos; %
                 end
             end
 
@@ -77,13 +144,20 @@ classdef WSN_TopologyGenerator
                 hullIdx = [];
             end
 
-            % sort demotion candidates (closest first)
+            % sort demotion candidates (closest first, non-hull preferred)
             demotable = setdiff(1:throwGWNs, hullIdx);
             [~,ord] = sort(dists(demotable),'ascend');
             demotable = demotable(ord);
 
+            % fallback: if demotable too small, append hull nodes (closest first)
+            if numel(demotable) < (throwGWNs - targetGWNs)
+                hullSorted = hullIdx(~ismember(hullIdx, demotable));
+                [~,hord] = sort(dists(hullSorted),'ascend');
+                demotable = [demotable; hullSorted(hord)];
+            end
+
             ptr = 1;
-            while sum([nodes(1:throwGWNs).tier] == 3) > targetGWNs
+            while sum([nodes(1:throwGWNs).tier] == 3) > targetGWNs && ptr <= numel(demotable)
                 k = demotable(ptr);
                 nodes(k).tier = 2;
                 nodes(k).type = 'CH';
@@ -109,41 +183,81 @@ classdef WSN_TopologyGenerator
             end
 
             % =================================================
-            % PHASE E — ADDITIONAL CHs (ONLY IF NEEDED)
+            % PHASE E — ADDITIONAL CHs (EVENLY DISTRIBUTED)
             % =================================================
             chCount = sum([nodes(1:idx-1).tier] == 2);
             needCH = max(0, targetCHs - chCount);
 
-            for c = 1:needCH
-                placed = false;
-                while ~placed
-                    cand = rand(1,2).*field;
-                    if inpolygon(cand(1),cand(2),hullX,hullY)
-                        nodes(idx).pos = cand;
-                        nodes(idx).tier = 2;
-                        nodes(idx).type = 'CH';
-                        nodes(idx).offset = randi([0 100]);
-                        idx = idx + 1;
-                        placed = true;
-                    end
+            if needCH > 0
+                % Use grid-based distribution with random perturbation
+                % for even/uniform spread inside the polygon
+                chPositions = WSN_TopologyGenerator.distributePoissonDisk(...
+                    hullX, hullY, needCH, field);
+                
+                for c = 1:size(chPositions, 1)
+                    nodes(idx).pos = chPositions(c,:);
+                    nodes(idx).tier = 2;
+                    nodes(idx).type = 'CH';
+                    nodes(idx).offset = randi([0 100]);
+                    idx = idx + 1;
                 end
             end
 
             % =================================================
-            % PHASE F — SENSOR PLACEMENT
+            % PHASE F — SENSOR PLACEMENT (AROUND CHs + FILL)
             % =================================================
-            for s = 1:numSensors
-                placed = false;
-                while ~placed
-                    cand = rand(1,2).*field;
-                    if inpolygon(cand(1),cand(2),hullX,hullY)
-                        nodes(idx).pos = cand;
-                        nodes(idx).tier = 1;
-                        nodes(idx).type = 'SENSOR';
-                        nodes(idx).offset = randi([0 100]);
-                        idx = idx + 1;
-                        placed = true;
+            % Get all current clusterheads
+            chIdx = find([nodes(1:idx-1).tier] == 2);
+            chPositions = reshape([nodes(chIdx).pos],2,[])';
+            
+            numSensorsPlaced = 0;
+            sensorsPerCH = max(1, floor(numSensors / max(1, numel(chIdx))));
+            
+            % Step 1: Distribute sensors around each clusterhead
+            for ch = 1:numel(chIdx)
+                chPos = chPositions(ch,:);
+                
+                % Place sensorsPerCH sensors in a radius around this CH
+                for s = 1:sensorsPerCH
+                    if numSensorsPlaced >= numSensors
+                        break;
                     end
+                    
+                    placed = false;
+                    attempts = 0;
+                    while ~placed && attempts < 20
+                        % Random angle and radius for clustering
+                        angle = rand() * 2 * pi;
+                        % Radius: 5-20 units from CH (proximity clustering)
+                        radius = 5 + rand() * 15;
+                        cand = chPos + radius * [cos(angle), sin(angle)];
+                        
+                        % Ensure within field bounds and polygon
+                        if all(cand >= 1) && all(cand <= field) && ...
+                           inpolygon(cand(1),cand(2),hullX,hullY)
+                            nodes(idx).pos = cand;
+                            nodes(idx).tier = 1;
+                            nodes(idx).type = 'SENSOR';
+                            nodes(idx).offset = randi([0 100]);
+                            idx = idx + 1;
+                            numSensorsPlaced = numSensorsPlaced + 1;
+                            placed = true;
+                        end
+                        attempts = attempts + 1;
+                    end
+                end
+            end
+            
+            % Step 2: Fill remaining sensors uniformly across polygon
+            while numSensorsPlaced < numSensors
+                cand = rand(1,2).*field;
+                if inpolygon(cand(1),cand(2),hullX,hullY)
+                    nodes(idx).pos = cand;
+                    nodes(idx).tier = 1;
+                    nodes(idx).type = 'SENSOR';
+                    nodes(idx).offset = randi([0 100]);
+                    idx = idx + 1;
+                    numSensorsPlaced = numSensorsPlaced + 1;
                 end
             end
 

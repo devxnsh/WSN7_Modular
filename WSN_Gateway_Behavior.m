@@ -32,6 +32,44 @@ classdef WSN_Gateway_Behavior < handle
             gw = obj.gw;
             actions = {};
             
+            % === ATTACK: FLOODING (Hello Flood) ===
+            % Malicious GWN broadcasts excessive HELLO messages with inflated TX power
+            if WSN_Attack.isMaliciousNode(gw.id) && ...
+               WSN_Attack.getAttackType(gw.id) == WSN_Attack.ATTACK_FLOODING
+                floodCount = WSN_Attack.getFloodingBurstCount(gw.id, t);
+                if floodCount > 0
+                    % Temporarily inflate TX power for flooding
+                    originalPower = gw.txPower;
+                    gw.txPower = WSN_Attack.getFloodingTxPower(gw.id);
+                    
+                    % Broadcast multiple HELLO messages
+                    for fi = 1:floodCount
+                        floodMsg = gw.createHelloMessage(t);
+                        floodMsg.uid = randi(1e9);  % Unique ID per flood message
+                        actions{end+1} = struct('type', 'RESP', 'msg', floodMsg);
+                        gw.addLog(sprintf('t=%d [HELLO_TX] bat=%d%% nbr=%d', ...
+                            t, uint8(gw.battery), numel(gw.neighborTable)));
+                    end
+                    
+                    % Restore original power
+                    gw.txPower = originalPower;
+                end
+            end
+            
+            % === ATTACK: PANIC FLOOD (Sinkhole Variant) ===
+            % Malicious GWN broadcasts fake emergency alerts
+            if WSN_Attack.isMaliciousNode(gw.id) && ...
+               WSN_Attack.getAttackType(gw.id) == WSN_Attack.ATTACK_PANIC_FLOOD
+                if WSN_Attack.shouldPanicFlood(gw.id, t)
+                    panicMsg = WSN_Attack.createFakePanicBeacon(gw.id, gw.hexID, t);
+                    if ~isempty(panicMsg)
+                        actions{end+1} = struct('type', 'RESP', 'msg', panicMsg);
+                        gw.addLog(sprintf('t=%d [PANIC_TX] type=%d sev=%d', ...
+                            t, panicMsg.subtype, 2));
+                    end
+                end
+            end
+            
             % =================================================
             % GWN CHARGING (every GWN_CHARGE_INTERVAL timeframes)
             % =================================================
@@ -164,8 +202,9 @@ classdef WSN_Gateway_Behavior < handle
             
             % =================================================
             % PHASE-BASED BACKBONE SCHEDULING (replaces TOKEN system)
+            % GWN must be in SECURE STATE to use phase scheduling
             % =================================================
-            if gw.isVerified && gw.phaseInherited && t >= WSN_Config.PHASE_START_TIME
+            if gw.state == WSN_Config.STATE_SECURE && gw.isVerified && gw.phaseInherited && t >= WSN_Config.PHASE_START_TIME
                 % Compute current phase from global key and time
                 currentPhase = gw.messaging.computePhase(t);
                 gw.currentPhase = currentPhase;

@@ -40,7 +40,8 @@ classdef WSN_GUI_Topology < handle
             end
         end
         
-        function update(obj, nodes, physAdj, selectedID)
+        function update(obj, nodes, ~, selectedID)
+            % physAdj parameter reserved for future use (e.g., link drawing)
             id2idx = @(hid) find(arrayfun(@(x) hex2dec(x.hexID) == hid, nodes), 1);
             cla(obj.ax); hold(obj.ax,'on');
             hull = WSN_TopologyGenerator.getGWNHull(nodes);
@@ -149,6 +150,16 @@ classdef WSN_GUI_Topology < handle
                 end
                 if n.tier==2, faceCol=[0.6 0 0.8]; edgeCol='k'; end
                 if k == selectedID, edgeCol = 'm'; lw = 2.5; end
+                
+                % --- ATTACK NODE COLOR OVERRIDE ---
+                [atkFace, atkEdge, atkLW] = WSN_Attack.getNodeColor(k);
+                if ~isempty(atkFace)
+                    faceCol = atkFace;
+                    edgeCol = atkEdge;
+                    lw = atkLW;
+                    sz = 50;  % Slightly larger for visibility
+                end
+                
                 scatter(obj.ax, n.pos(1), n.pos(2), sz, 'MarkerFaceColor', faceCol, 'MarkerEdgeColor', edgeCol, 'LineWidth', lw);
                 text(obj.ax, n.pos(1)+1.5, n.pos(2)+1.5, n.hexID, 'FontSize',8, 'FontWeight','bold');
             end
@@ -193,6 +204,85 @@ classdef WSN_GUI_Topology < handle
                     'Color', col, ...
                     'LineWidth', lw, ...
                     'LineStyle', ls);
+            end
+        end
+        
+        function drawAttackVisuals(obj, nodes, t)
+            % Draw attack-related visual overlays:
+            % - Ghost links (dropped packets from Blackhole/Grayhole)
+            % - Wormhole tunnels
+            % - DoS target lines
+            % - Sybil fake identities
+            
+            data = WSN_Attack.getData();
+            if isempty(data), return; end
+            
+            % --- GHOST LINKS (dashed red for dropped packets) ---
+            if isfield(data, 'ghostLinks') && ~isempty(data.ghostLinks)
+                validLinks = data.ghostLinks([data.ghostLinks.expiry] >= t);
+                for k = 1:numel(validLinks)
+                    gl = validLinks(k);
+                    if gl.srcIdx < 1 || gl.srcIdx > numel(nodes), continue; end
+                    srcPos = nodes(gl.srcIdx).pos;
+                    % Find destination by hexID
+                    dstIdx = find(strcmp({nodes.hexID}, gl.dstHexID), 1);
+                    if isempty(dstIdx), continue; end
+                    dstPos = nodes(dstIdx).pos;
+                    plot(obj.ax, [srcPos(1) dstPos(1)], [srcPos(2) dstPos(2)], ...
+                        'r--', 'LineWidth', 1.5, 'Color', [1 0 0 0.5]);
+                end
+            end
+            
+            % --- WORMHOLE TUNNELS (purple dashed line between endpoints) ---
+            if isfield(data, 'wormholeEndpoints') && ~isempty(data.wormholeEndpoints)
+                for k = 1:size(data.wormholeEndpoints, 1)
+                    ep = data.wormholeEndpoints(k, :);
+                    idx1 = ep(1); idx2 = ep(2);
+                    if idx1 < 1 || idx1 > numel(nodes), continue; end
+                    if idx2 < 1 || idx2 > numel(nodes), continue; end
+                    pos1 = nodes(idx1).pos;
+                    pos2 = nodes(idx2).pos;
+                    plot(obj.ax, [pos1(1) pos2(1)], [pos1(2) pos2(2)], ...
+                        '--', 'LineWidth', 2, 'Color', [0.6 0 1 0.7]);  % Purple
+                end
+            end
+            
+            % --- DOS TARGET LINES (double orange line) ---
+            if isfield(data, 'dosTargets') && ~isempty(data.dosTargets)
+                validDos = data.dosTargets([data.dosTargets.expiry] >= t);
+                for k = 1:numel(validDos)
+                    dos = validDos(k);
+                    if dos.srcIdx < 1 || dos.srcIdx > numel(nodes), continue; end
+                    srcPos = nodes(dos.srcIdx).pos;
+                    dstIdx = find(strcmp({nodes.hexID}, dos.dstHexID), 1);
+                    if isempty(dstIdx), continue; end
+                    dstPos = nodes(dstIdx).pos;
+                    % Draw double line effect
+                    plot(obj.ax, [srcPos(1) dstPos(1)], [srcPos(2) dstPos(2)], ...
+                        '-', 'LineWidth', 3, 'Color', [1 0.5 0 0.3]);
+                    plot(obj.ax, [srcPos(1) dstPos(1)], [srcPos(2) dstPos(2)], ...
+                        '-', 'LineWidth', 1, 'Color', [1 0.5 0 0.8]);
+                end
+            end
+            
+            % --- SYBIL FAKE IDENTITIES (small orange circles near attacker) ---
+            if isfield(data, 'sybilIdentities')
+                for nodeIdx = 1:numel(nodes)
+                    ids = data.sybilIdentities{nodeIdx};
+                    if isempty(ids), continue; end
+                    if nodeIdx > numel(nodes), continue; end
+                    basePos = nodes(nodeIdx).pos;
+                    numIds = numel(ids);
+                    for j = 1:numIds
+                        % Offset each fake identity in a small arc
+                        angle = (j-1) * (2*pi/max(numIds,1)) + pi/4;
+                        offset = 8 * [cos(angle), sin(angle)];
+                        fakePos = basePos + offset;
+                        plot(obj.ax, fakePos(1), fakePos(2), 'o', ...
+                            'MarkerSize', 6, 'MarkerFaceColor', [1 0.5 0], ...
+                            'MarkerEdgeColor', [0.8 0.3 0], 'LineWidth', 1);
+                    end
+                end
             end
         end
 

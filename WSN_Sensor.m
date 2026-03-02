@@ -5,6 +5,22 @@ classdef WSN_Sensor < WSN_Node
         nextSensorTX = 0           % Next scheduled sensor TX time
         sensorValue = 0            % Current sensor reading (random 0-100)
         prevSensorValue = 50       % Previous sensor value for priority calculation
+        
+        % --- ORPHAN STATE & EXTENDED SLEEP ---
+        isOrphaned = false         % True if no CH/GWN found for extended period
+        orphanCheckCount = 0       % Counter for consecutive failed target searches
+        orphanThreshold = 5        % Consecutive failures before orphan mode
+        
+        % --- RADIO STATE ---
+        radioState = 'RX'          % 'RX', 'TX', 'SLEEP' - default RX when awake
+        
+        % --- PANIC HANDLING ---
+        lastPanicTime = -1000      % Last time a panic was sent (cooldown)
+        panicCooldown = 500        % Min timeframes between panic signals (very rare)
+        seenPanicUIDs = []         % UIDs of already-processed panic messages (dedup)
+        
+        % --- TRUST STUB (Placeholder for future trust model) ---
+        neighborTrust = struct('id',{}, 'score',{})  % Trust scores per neighbor
     end
     
     methods
@@ -19,17 +35,29 @@ classdef WSN_Sensor < WSN_Node
         end
         
         function updatePhysics(obj, t)
-            if obj.battery <= 0, obj.isAwake = false; return; end
+            if obj.battery <= 0, obj.isAwake = false; obj.radioState = 'SLEEP'; return; end
             
-            % Sensors SLEEP when not transmitting (very low discharge)
-            % Wake cycle only during TX window
-            if mod(t + obj.offset, 20) < 4
+            % Determine wake window based on orphan state
+            if obj.isOrphaned
+                % Extended sleep mode: 75% longer sleep cycles
+                wakeWindow = WSN_Config.SENSOR_ORPHAN_WAKE_WINDOW;
+                sleepCycleFactor = 1 + WSN_Config.SENSOR_ORPHAN_SLEEP_FACTOR;
+                cycleLength = round(20 * sleepCycleFactor);  % Extended cycle
+            else
+                wakeWindow = WSN_Config.SENSOR_NORMAL_WAKE_WINDOW;
+                cycleLength = 20;  % Normal cycle
+            end
+            
+            % Wake cycle: sensor wakes briefly during TX window
+            if mod(t + obj.offset, cycleLength) < wakeWindow
                 obj.isAwake = true;
-                % Awake: normal idle cost (but minimal since wake window is short)
+                obj.radioState = 'RX';  % Default to RX mode when awake (listening)
+                % Awake: idle cost
                 obj.battery = max(0, obj.battery - WSN_Config.IdleCost);
             else
                 obj.isAwake = false;
-                % Sleep: very low discharge (v.v. low power mode)
+                obj.radioState = 'SLEEP';
+                % Sleep: very low discharge
                 obj.battery = max(0, obj.battery - WSN_Config.SleepCost);
             end
         end
@@ -37,10 +65,49 @@ classdef WSN_Sensor < WSN_Node
         function msgs = step(obj, t, ~, ~)
             msgs = [];
             
+            % === ATTACK: FLOODING (Hello Flood) ===
+            % Malicious sensor broadcasts excessive HELLO messages with inflated TX power
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_FLOODING
+                floodCount = WSN_Attack.getFloodingBurstCount(obj.id, t);
+                if floodCount > 0
+                    % Temporarily inflate TX power for flooding
+                    originalPower = obj.txPower;
+                    obj.txPower = WSN_Attack.getFloodingTxPower(obj.id);
+                    
+                    % Broadcast multiple HELLO messages
+                    for fi = 1:floodCount
+                        floodMsg = obj.createHelloMessage(t);
+                        floodMsg.uid = randi(1e9);  % Unique ID per flood message
+                        msgs = [msgs, floodMsg];
+                        obj.addLog(sprintf('t=%d [HELLO_TX] bat=%d%% nbr=%d', ...
+                            t, uint8(obj.battery), numel(obj.neighborTable)));
+                    end
+                    
+                    % Restore original power
+                    obj.txPower = originalPower;
+                end
+            end
+            
+            % === ATTACK: PANIC FLOOD (Sinkhole Variant) ===
+            % Malicious sensor broadcasts fake emergency alerts
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_PANIC_FLOOD
+                if WSN_Attack.shouldPanicFlood(obj.id, t)
+                    panicMsg = WSN_Attack.createFakePanicBeacon(obj.id, obj.hexID, t);
+                    if ~isempty(panicMsg)
+                        msgs = [msgs, panicMsg];
+                        obj.addLog(sprintf('t=%d [PANIC_TX] type=%d sev=%d', ...
+                            t, panicMsg.subtype, 2));
+                    end
+                end
+            end
+            
             % --- PHASE 2: HELLO BURST ---
             if t >= 0 && t == obj.nextHelloBurst
                 helloMsg = obj.createHelloMessage(t);
                 msgs = [msgs, helloMsg];
+                obj.radioState = 'TX';  % Mark as transmitting
                 % Local log only (no global event bus for Hello)
                 obj.addLog(sprintf('t=%d [HELLO_TX] bat=%d%% nbr=%d', ...
                     t, uint8(obj.battery), numel(obj.neighborTable)));
@@ -61,8 +128,68 @@ classdef WSN_Sensor < WSN_Node
                     target = obj.findBestSensorTarget();
                     
                     if ~isempty(target)
-                        % Generate new sensor reading
-                        newValue = randi([0, 100]);
+                        % Reset orphan state - we have connectivity
+                        if obj.isOrphaned
+                            obj.addLog(sprintf('t=%d [ORPHAN_RECOVERED] Found target %s', ...
+                                t, dec2hex(uint16(target), 4)));
+                        end
+                        obj.isOrphaned = false;
+                        obj.orphanCheckCount = 0;
+                        
+                        % Generate new sensor reading (realistic: gradual drift with rare spikes)
+                        % Normal operation: small random walk around current value
+                        drift = randi([-5, 5]);  % Small drift: -5 to +5
+                        newValue = max(0, min(100, obj.prevSensorValue + drift));
+                        
+                        % Rare anomaly event: 0.5% chance of extreme spike (actual emergency)
+                        if rand() < 0.005
+                            % Extreme spike: jump to very high or very low value
+                            if rand() < 0.5
+                                newValue = randi([90, 100]);  % Spike high
+                            else
+                                newValue = randi([0, 10]);    % Spike low
+                            end
+                        end
+                        
+                        % === ANOMALY DETECTION ===
+                        % Check for significant deviation from previous value
+                        % With gradual drift, this should ONLY trigger on actual spikes
+                        anomalyDetected = false;
+                        if obj.prevSensorValue > 0
+                            pctChange = abs(newValue - obj.prevSensorValue) / obj.prevSensorValue * 100;
+                            if pctChange >= WSN_Config.PANIC_ANOMALY_THRESHOLD
+                                anomalyDetected = true;
+                            end
+                        end
+                        
+                        % Check critical battery
+                        batteryCritical = obj.battery <= WSN_Config.PANIC_BATTERY_CRIT_LEVEL;
+                        
+                        % === PANIC SIGNAL GENERATION ===
+                        if (anomalyDetected || batteryCritical) && ...
+                           (t - obj.lastPanicTime) >= obj.panicCooldown
+                            
+                            % Determine panic type and severity
+                            if anomalyDetected && batteryCritical
+                                panicType = WSN_Config.PANIC_SUB_ANOMALY;
+                                panicSeverity = WSN_Config.PANIC_SEV_HIGH;
+                            elseif batteryCritical
+                                panicType = WSN_Config.PANIC_SUB_BATTERY_CRIT;
+                                panicSeverity = WSN_Config.PANIC_SEV_MEDIUM;
+                            else
+                                panicType = WSN_Config.PANIC_SUB_ANOMALY;
+                                panicSeverity = WSN_Config.PANIC_SEV_MEDIUM;
+                            end
+                            
+                            % Create and send panic message
+                            panicMsg = obj.createPanicMessage(t, target, panicType, panicSeverity, newValue);
+                            msgs = [msgs, panicMsg];
+                            obj.lastPanicTime = t;
+                            obj.radioState = 'TX';
+                            
+                            obj.addLog(sprintf('t=%d [PANIC_TX] type=%d sev=%d val=%d -> %s', ...
+                                t, panicType, panicSeverity, newValue, dec2hex(uint16(target), 4)));
+                        end
                         
                         % Calculate priority based on value change (2-bit field)
                         % Priority 0: default, 1: 20% change, 2: 45% change, 3: reserved
@@ -91,15 +218,39 @@ classdef WSN_Sensor < WSN_Node
                         % Create and send sensor message with priority
                         sensorMsg = obj.createSensorMessage(t, target, priority);
                         msgs = [msgs, sensorMsg];
+                        obj.radioState = 'TX';  % Mark as transmitting
                         
                         obj.addLog(sprintf('t=%d [SENSOR_TX] val=%d bat=%d%% pri=%d -> %s', ...
                             t, obj.sensorValue, uint8(obj.battery), priority, dec2hex(uint16(target), 4)));
+                    else
+                        % No target found - increment orphan counter
+                        obj.orphanCheckCount = obj.orphanCheckCount + 1;
+                        
+                        if obj.orphanCheckCount >= obj.orphanThreshold && ~obj.isOrphaned
+                            obj.isOrphaned = true;
+                            obj.addLog(sprintf('t=%d [ORPHAN_MODE] No CH/GWN found - entering extended sleep (75%%)', t));
+                            
+                            % Send LINK_LOSS panic as broadcast flood
+                            if (t - obj.lastPanicTime) >= obj.panicCooldown
+                                panicMsg = obj.createPanicMessage(t, [], ...
+                                    WSN_Config.PANIC_SUB_LINK_LOSS, WSN_Config.PANIC_SEV_HIGH, 0);
+                                msgs = [msgs, panicMsg];
+                                obj.lastPanicTime = t;
+                                obj.radioState = 'TX';
+                                obj.addLog(sprintf('t=%d [PANIC_TX] LINK_LOSS broadcast', t));
+                            end
+                        end
                     end
                     
                     % Schedule next TX with jitter
                     jitter = randi([WSN_Config.SENSOR_JITTER_MIN, WSN_Config.SENSOR_JITTER_MAX]);
                     obj.nextSensorTX = t + obj.sensorPeriod + jitter;
                 end
+            end
+            
+            % Return to RX mode after TX operations
+            if ~strcmp(obj.radioState, 'SLEEP')
+                obj.radioState = 'RX';
             end
         end
         
@@ -194,23 +345,192 @@ classdef WSN_Sensor < WSN_Node
         function response = receive(obj, msg, t, rssi)
             response = [];
             
+            % Only process if awake and in RX mode
+            if ~obj.isAwake || strcmp(obj.radioState, 'SLEEP')
+                return;
+            end
+            
+            % === ATTACK: BLACKHOLE/GRAYHOLE CHECK ===
+            % Malicious sensor may drop messages instead of processing/forwarding
+            if WSN_Attack.isMaliciousNode(obj.id)
+                attackType = WSN_Attack.getAttackType(obj.id);
+                if attackType == WSN_Attack.ATTACK_BLACKHOLE
+                    if WSN_Attack.shouldDropBlackhole(obj.id, t)
+                        % Log RX only - no forward/TX logged (stealth)
+                        obj.addLog(sprintf('t=%d [RX] type=%d.%d <- %s (no action)', ...
+                            t, msg.type, msg.subtype, dec2hex(uint16(msg.src), 4)));
+                        return;  % Drop message
+                    end
+                elseif attackType == WSN_Attack.ATTACK_GRAYHOLE
+                    if WSN_Attack.shouldDropGrayhole(obj.id, t)
+                        % Log RX only - no forward/TX logged (stealth)
+                        obj.addLog(sprintf('t=%d [RX] type=%d.%d <- %s (no action)', ...
+                            t, msg.type, msg.subtype, dec2hex(uint16(msg.src), 4)));
+                        return;  % Drop message selectively
+                    end
+                end
+            end
+            
             % Destination filtering for broadcast/multicast
             myID = hex2dec(obj.hexID);
             dst = msg.dst;
             isBroadcast = isempty(dst) || dst == 0 || dst == hex2dec('FFFF');
+            isForMe = (dst == myID);
             
-            if ~isBroadcast
-                % Only process broadcasts (Hello messages are always broadcast)
+            % --- PHASE 2: HELLO MESSAGE (Type 0) ---
+            if msg.type == 0 && isBroadcast && msg.verifyChecksum()
+                obj.handleHelloReception(msg, t, rssi);
                 return;
             end
             
-            % --- PHASE 2: HELLO MESSAGE (Type 0) ---
-            if msg.type == 0 && msg.verifyChecksum()
-                obj.handleHelloReception(msg, t, rssi);
+            % --- PANIC MESSAGE (Type 2) ---
+            if msg.type == WSN_Config.MSG_TYPE_PANIC && msg.verifyChecksum()
+                response = obj.handlePanicReception(msg, t, rssi);
+                return;
+            end
+        end
+        
+        function response = handlePanicReception(obj, msg, t, rssi)
+            % Handle incoming panic message - decide to forward or discard
+            response = [];
+            sender = msg.src;
+            
+            % Check if already seen this panic (deduplication by UID)
+            if ismember(msg.uid, obj.seenPanicUIDs)
+                return;  % Already processed
+            end
+            obj.seenPanicUIDs = [obj.seenPanicUIDs, msg.uid];
+            
+            % Prune old UIDs (keep last 50)
+            if numel(obj.seenPanicUIDs) > 50
+                obj.seenPanicUIDs = obj.seenPanicUIDs(end-49:end);
             end
             
-            % Sensors don't process other messages in this simulation
-            % They are passive data sources
+            % Check TTL
+            if msg.ttl <= 0
+                obj.addLog(sprintf('t=%d [PANIC_DROP] TTL expired from %s', ...
+                    t, dec2hex(uint16(sender), 4)));
+                return;
+            end
+            
+            % === TRUST-BASED FORWARDING DECISION (STUB) ===
+            trustScore = obj.getNeighborTrust(sender);
+            if trustScore < 10  % Very low trust - discard
+                obj.addLog(sprintf('t=%d [PANIC_DROP] Low trust (%.1f) from %s', ...
+                    t, trustScore, dec2hex(uint16(sender), 4)));
+                return;
+            end
+            
+            obj.addLog(sprintf('t=%d [PANIC_RX] type=%d sev=%d from %s trust=%.1f', ...
+                t, msg.subtype, msg.prio, dec2hex(uint16(sender), 4), trustScore));
+            
+            % Forward panic to parent (if connected) or broadcast
+            if ~isempty(obj.parent)
+                % Unicast forward to parent
+                fwdMsg = obj.createPanicForward(msg, obj.parent);
+                response = fwdMsg;
+                obj.addLog(sprintf('t=%d [PANIC_FWD] -> parent %s (TTL=%d)', ...
+                    t, dec2hex(uint16(obj.parent), 4), fwdMsg.ttl));
+            elseif msg.prio >= WSN_Config.PANIC_SEV_HIGH
+                % High severity: broadcast flood
+                fwdMsg = obj.createPanicForward(msg, []);
+                response = fwdMsg;
+                obj.addLog(sprintf('t=%d [PANIC_FWD] -> broadcast (TTL=%d)', t, fwdMsg.ttl));
+            end
+        end
+        
+        function fwdMsg = createPanicForward(obj, origMsg, dst)
+            % Create forwarded panic message with decremented TTL
+            fwdMsg = WSN_Message();
+            fwdMsg.type = WSN_Config.MSG_TYPE_PANIC;
+            fwdMsg.subtype = origMsg.subtype;
+            fwdMsg.src = hex2dec(obj.hexID);  % Immediate forwarder
+            fwdMsg.dst = dst;  % Can be empty for broadcast
+            fwdMsg.ttl = origMsg.ttl - 1;  % Decrement TTL
+            fwdMsg.prio = origMsg.prio;
+            fwdMsg.seq = origMsg.seq;
+            fwdMsg.uid = origMsg.uid;  % Preserve UID for deduplication
+            
+            % Copy payload (contains original sender + data)
+            fwdMsg.payload = origMsg.payload;
+            fwdMsg.payloadLen = origMsg.payloadLen;
+            
+            fwdMsg.addChecksum();
+            fwdMsg.color = [1.0 0.2 0.2];  % Red for panic
+        end
+        
+        function msg = createPanicMessage(obj, t, target, panicType, severity, sensorValue)
+            % Create Type 2 PANIC message
+            % Payload: [OriginalSrc(2), SensorValue(2), Battery(1), Timestamp(2)]
+            % Fields:
+            %   - type: MSG_TYPE_PANIC (2)
+            %   - subtype: panic type (ANOMALY, BATTERY_CRIT, INTRUSION, LINK_LOSS)
+            %   - prio: severity level (LOW, MEDIUM, HIGH, CRITICAL)
+            %   - ttl: time-to-live for flood propagation
+            %   - payload: sensor data context
+            
+            msg = WSN_Message();
+            msg.type = WSN_Config.MSG_TYPE_PANIC;
+            msg.subtype = uint8(panicType);
+            msg.src = hex2dec(obj.hexID);
+            msg.dst = target;  % Can be empty for broadcast flood
+            msg.prio = uint8(severity);
+            msg.seq = mod(t, 256);
+            
+            % Set TTL based on severity
+            if severity >= WSN_Config.PANIC_SEV_HIGH
+                msg.ttl = WSN_Config.PANIC_DEFAULT_TTL;
+            else
+                msg.ttl = 1;  % Low/medium: single hop to parent
+            end
+            
+            % Payload: original sender (2) + sensor value (2) + battery (1) + timestamp (2)
+            origSrcBytes = typecast(uint16(hex2dec(obj.hexID)), 'uint8');
+            valueBytes = typecast(uint16(sensorValue), 'uint8');
+            batteryByte = uint8(round(obj.battery));
+            timeBytes = typecast(uint16(mod(t, 65536)), 'uint8');
+            msg.payload = [origSrcBytes, valueBytes, batteryByte, timeBytes];
+            msg.payloadLen = 7;
+            
+            msg.addChecksum();
+            msg.color = [1.0 0.2 0.2];  % Red for panic
+        end
+        
+        % =====================================================
+        % TRUST STUB (Placeholder for future trust model)
+        % =====================================================
+        function score = getNeighborTrust(obj, neighborID)
+            % STUB: Returns trust score for a neighbor
+            % Future implementation will use historical behavior analysis
+            %
+            % Trust factors to consider (NOT YET IMPLEMENTED):
+            % - Message delivery success rate
+            % - Consistency of reported values
+            % - Energy consumption patterns
+            % - Response time to queries
+            % - Anomalous behavior detection
+            
+            idx = find([obj.neighborTrust.id] == neighborID, 1);
+            if isempty(idx)
+                % Default trust for unknown neighbors
+                score = 50;  % Neutral trust
+            else
+                score = obj.neighborTrust(idx).score;
+            end
+        end
+        
+        function updateNeighborTrust(obj, neighborID, delta)
+            % STUB: Update trust score for neighbor
+            % delta > 0: increase trust (good behavior)
+            % delta < 0: decrease trust (suspicious behavior)
+            
+            idx = find([obj.neighborTrust.id] == neighborID, 1);
+            if isempty(idx)
+                obj.neighborTrust(end+1) = struct('id', neighborID, 'score', 50 + delta);
+            else
+                newScore = max(0, min(100, obj.neighborTrust(idx).score + delta));
+                obj.neighborTrust(idx).score = newScore;
+            end
         end
         
         function handleHelloReception(obj, msg, t, rssi)
@@ -236,7 +556,7 @@ classdef WSN_Sensor < WSN_Node
             if isempty(idx)
                 obj.neighborTable(end+1) = struct( ...
                     'id', sender, 'lastSeen', t, 'rssi', rssi, ...
-                    'trust', 20, 'commRange', 0, 'status', 0, ...
+                    'TrustScore', 50, 'commRange', 0, 'status', 0, ...
                     'tier', tier, 'battery', battery, 'neighborCount', neighborCount, ...
                     'isVerified', senderVerified);
                 % Local log only for NEW neighbors

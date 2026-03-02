@@ -92,8 +92,8 @@ classdef WSN_GUI_SinkAnalytics < handle
             
             obj.sensorTable = uitable('Parent', parentTab, 'Units', 'normalized', ...
                 'Position', [0.02 0.22 0.96 0.14], ...
-                'ColumnName', {'Sensor', 'Parent', 'Route History', 'Time', 'Value', 'Bat%'}, ...
-                'ColumnWidth', {70, 70, 280, 60, 60, 50}, ...
+                'ColumnName', {'Sensor', 'Parent', 'Route History', 'Trust', 'Value', 'Bat%'}, ...
+                'ColumnWidth', {70, 70, 260, 50, 60, 50}, ...
                 'RowName', [], 'FontSize', 9);
             
             % Sink Routing Registry Table Header
@@ -161,7 +161,7 @@ classdef WSN_GUI_SinkAnalytics < handle
                 % Update dropdown
                 sensorIDs = {'-- None --'};
                 for k = 1:numel(sreg)
-                    sensorIDs{end+1} = sreg(k).hexID; %#ok<AGROW>
+                    sensorIDs{end+1} = sreg(k).hexID; %
                 end
                 currentVal = get(obj.sensorDropdown, 'Value');
                 set(obj.sensorDropdown, 'String', sensorIDs);
@@ -173,7 +173,13 @@ classdef WSN_GUI_SinkAnalytics < handle
                 sensorData = cell(numel(sreg), 6);
                 for k = 1:numel(sreg)
                     s = sreg(k);
-                    if ~isempty(s.timeseries)
+                    % Get trust score (default 50 if field missing)
+                    trustScore = 50;
+                    if isfield(s, 'TrustScore') && ~isempty(s.TrustScore)
+                        trustScore = s.TrustScore;
+                    end
+                    
+                    if ~isempty(s.timeseries) && isstruct(s.timeseries)
                         latest = s.timeseries(end);
                         routeHist = '-';
                         if isfield(s, 'routeHistory') && ~isempty(s.routeHistory)
@@ -181,10 +187,15 @@ classdef WSN_GUI_SinkAnalytics < handle
                         else
                             routeHist = dec2hex(uint16(s.parentCH), 4);
                         end
+                        % Get value and battery safely
+                        latestVal = '-';
+                        latestBat = '-';
+                        if isfield(latest, 'value'), latestVal = latest.value; end
+                        if isfield(latest, 'battery'), latestBat = latest.battery; end
                         sensorData(k,:) = {s.hexID, dec2hex(uint16(s.parentCH), 4), ...
-                                          routeHist, latest.time, latest.value, latest.battery};
+                                          routeHist, trustScore, latestVal, latestBat};
                     else
-                        sensorData(k,:) = {s.hexID, dec2hex(uint16(s.parentCH), 4), '-', '-', '-', '-'};
+                        sensorData(k,:) = {s.hexID, dec2hex(uint16(s.parentCH), 4), '-', trustScore, '-', '-'};
                     end
                 end
                 set(obj.sensorTable, 'Data', sensorData);
@@ -207,12 +218,28 @@ classdef WSN_GUI_SinkAnalytics < handle
             obj.timeHistory(end+1) = t;
             obj.healthHistory(end+1) = healthPct;
             
-            % === Throughput ===
-            throughput = 0;
+            % === Throughput (Active Sensors) ===
+            totalSensors = 0;
+            activeSensors = 0;
             if ~isempty(sinkNode) && isprop(sinkNode, 'sensorRegistry')
-                throughput = numel(sinkNode.sensorRegistry);
+                totalSensors = numel(sinkNode.sensorRegistry);
+                % Count active sensors (reported within last 50 ticks)
+                if ismethod(sinkNode, 'getActiveSensorsCount')
+                    activeSensors = sinkNode.getActiveSensorsCount(t, 50);
+                else
+                    % Fallback: count manually
+                    for si = 1:numel(sinkNode.sensorRegistry)
+                        s = sinkNode.sensorRegistry(si);
+                        if ~isempty(s.timeseries) && isstruct(s.timeseries)
+                            latestTime = s.timeseries(end).time;
+                            if (t - latestTime) <= 50
+                                activeSensors = activeSensors + 1;
+                            end
+                        end
+                    end
+                end
             end
-            obj.throughputHistory(end+1) = throughput;
+            obj.throughputHistory(end+1) = activeSensors;
             
             % Limit history
             maxHistory = 200;
@@ -230,11 +257,11 @@ classdef WSN_GUI_SinkAnalytics < handle
             title(obj.axHealth, sprintf('Network Health: %.0f%% (%d/%d awake)', ...
                 healthPct, numActive, numel(nodes)), 'Color', [0.1 0.4 0.1], 'FontSize', 10, 'FontWeight', 'bold');
             
-            % === Plot Throughput ===
+            % === Plot Sensors Tracked ===
             cla(obj.axThru);
             stem(obj.axThru, obj.timeHistory, obj.throughputHistory, ...
                 'Color', [0.2 0.4 0.8], 'MarkerFaceColor', [0.3 0.5 0.9], 'MarkerSize', 3);
-            title(obj.axThru, sprintf('Sensors Tracked: %d', throughput), ...
+            title(obj.axThru, sprintf('Sensors Tracked: %d active / %d total', activeSensors, totalSensors), ...
                 'Color', [0.1 0.2 0.5], 'FontSize', 10, 'FontWeight', 'bold');
             
             % === Plot Selected Sensor ===
@@ -253,6 +280,13 @@ classdef WSN_GUI_SinkAnalytics < handle
             cla(obj.axSensorBattery);
             cla(obj.axSensorValue);
             
+            % Guard: check registry is valid
+            if isempty(sensorRegistry) || ~isstruct(sensorRegistry)
+                title(obj.axSensorBattery, 'No sensor data', 'Color', [0.5 0.4 0.2]);
+                title(obj.axSensorValue, 'No sensor data', 'Color', [0.5 0.4 0.2]);
+                return;
+            end
+            
             idx = find([sensorRegistry.id] == obj.selectedSensorID, 1);
             if isempty(idx)
                 title(obj.axSensorBattery, 'Sensor not found', 'Color', [0.6 0.2 0.2]);
@@ -261,28 +295,65 @@ classdef WSN_GUI_SinkAnalytics < handle
             end
             
             s = sensorRegistry(idx);
-            if isempty(s.timeseries)
-                title(obj.axSensorBattery, sprintf('%s: No data yet', s.hexID), 'Color', [0.5 0.4 0.2]);
-                title(obj.axSensorValue, sprintf('%s: No data yet', s.hexID), 'Color', [0.5 0.4 0.2]);
+            
+            % Guard: check timeseries exists and is valid
+            if ~isfield(s, 'timeseries') || isempty(s.timeseries) || ~isstruct(s.timeseries)
+                hexStr = 'Unknown';
+                if isfield(s, 'hexID'), hexStr = s.hexID; end
+                title(obj.axSensorBattery, sprintf('%s: No data yet', hexStr), 'Color', [0.5 0.4 0.2]);
+                title(obj.axSensorValue, sprintf('%s: No data yet', hexStr), 'Color', [0.5 0.4 0.2]);
                 return;
             end
             
-            times = [s.timeseries.time];
-            batteries = [s.timeseries.battery];
-            values = [s.timeseries.value];
-            
-            % Battery plot with gradient fill
-            area(obj.axSensorBattery, times, batteries, ...
-                'FaceColor', [0.2 0.6 0.6], 'EdgeColor', [0.1 0.4 0.4], 'FaceAlpha', 0.5);
-            ylim(obj.axSensorBattery, [0 100]);
-            title(obj.axSensorBattery, sprintf('%s Battery: %.0f%%', s.hexID, batteries(end)), ...
-                'Color', 'k', 'FontSize', 10);
-            
-            % Value plot with line + markers
-            plot(obj.axSensorValue, times, values, '-o', ...
-                'Color', [0.6 0.2 0.6], 'MarkerFaceColor', [0.8 0.4 0.8], 'MarkerSize', 4, 'LineWidth', 1.5);
-            title(obj.axSensorValue, sprintf('%s Value: %d', s.hexID, values(end)), ...
-                'Color', 'k', 'FontSize', 10);
+            % Extract timeseries data with validation
+            try
+                times = [];
+                batteries = [];
+                values = [];
+                
+                % Safely extract arrays from timeseries
+                if isfield(s.timeseries, 'time')
+                    times = [s.timeseries.time];
+                end
+                if isfield(s.timeseries, 'battery')
+                    batteries = [s.timeseries.battery];
+                end
+                if isfield(s.timeseries, 'value')
+                    values = [s.timeseries.value];
+                end
+                
+                % Ensure we have valid data to plot
+                if isempty(times) || (isempty(batteries) && isempty(values))
+                    title(obj.axSensorBattery, sprintf('%s: Incomplete data', s.hexID), 'Color', [0.5 0.4 0.2]);
+                    title(obj.axSensorValue, sprintf('%s: Incomplete data', s.hexID), 'Color', [0.5 0.4 0.2]);
+                    return;
+                end
+                
+                % Battery plot with gradient fill
+                if ~isempty(batteries) && numel(times) == numel(batteries)
+                    area(obj.axSensorBattery, times, batteries, ...
+                        'FaceColor', [0.2 0.6 0.6], 'EdgeColor', [0.1 0.4 0.4], 'FaceAlpha', 0.5);
+                    ylim(obj.axSensorBattery, [0 100]);
+                    title(obj.axSensorBattery, sprintf('%s Battery: %.0f%%', s.hexID, batteries(end)), ...
+                        'Color', 'k', 'FontSize', 10);
+                else
+                    title(obj.axSensorBattery, sprintf('%s: No battery data', s.hexID), 'Color', [0.5 0.4 0.2]);
+                end
+                
+                % Value plot with line + markers
+                if ~isempty(values) && numel(times) == numel(values)
+                    plot(obj.axSensorValue, times, values, '-o', ...
+                        'Color', [0.6 0.2 0.6], 'MarkerFaceColor', [0.8 0.4 0.8], 'MarkerSize', 4, 'LineWidth', 1.5);
+                    title(obj.axSensorValue, sprintf('%s Value: %d', s.hexID, values(end)), ...
+                        'Color', 'k', 'FontSize', 10);
+                else
+                    title(obj.axSensorValue, sprintf('%s: No value data', s.hexID), 'Color', [0.5 0.4 0.2]);
+                end
+            catch ME
+                % Catch any plotting errors and display gracefully
+                title(obj.axSensorBattery, sprintf('Error: %s', ME.message), 'Color', [0.6 0.2 0.2]);
+                title(obj.axSensorValue, sprintf('Plot error for %s', s.hexID), 'Color', [0.6 0.2 0.2]);
+            end
         end
     end
 end

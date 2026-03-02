@@ -12,37 +12,37 @@ HIERARCHY (Bottom to Top):
 ┌─────────────────────────────────────────────────────────────────────┐
 │  SINK (Tier 3, isSink=true)                                         │
 │    └── WSN_Sink extends WSN_Gateway                                 │
-│        ├── Terminal node: recruits GWNs, issues tokens             │
-│        ├── Maintains nodeRegistry (all recruited nodes)            │
-│        ├── Maintains sensorRegistry (timeseries data)              │
-│        └── Never has a parent (immune to PARENT_INIT)              │
+│        ├── Terminal node: recruits GWNs, issues tokens              │
+│        ├── Maintains nodeRegistry (all recruited nodes)             │
+│        ├── Maintains sensorRegistry (timeseries data)               │
+│        └── Never has a parent (immune to PARENT_INIT)               │ 
 ├─────────────────────────────────────────────────────────────────────┤
 │  GWN - Gateway Node (Tier 3)                                        │
 │    └── WSN_Gateway extends WSN_Node                                 │
-│        ├── Dual-radio: radioAccess (HC12), radio (LoRa Backbone)   │
-│        ├── FSM: BOOT → DISCOVERY → HANDSHAKE → SECURE              │
-│        ├── Recruits other GWNs via 3-step handshake               │
-│        ├── Recruits CHs via Type 6 CH_CMD handshake               │
-│        ├── Token-gated backbone buffer for uplink transmission     │
-│        ├── backboneBuffer[] holds msgs awaiting token              │
-│        └── Delegates behavior to WSN_Gateway_Behavior             │
+│        ├── Dual-radio: radioAccess (HC12), radio (LoRa Backbone)    │
+│        ├── FSM: BOOT → DISCOVERY → HANDSHAKE → SECURE               │
+│        ├── Recruits other GWNs via 3-step handshake                 │
+│        ├── Recruits CHs via Type 6 CH_CMD handshake                 │
+│        ├── Token-gated backbone buffer for uplink transmission      │
+│        ├── backboneBuffer[] holds msgs awaiting token               │
+│        └── Delegates behavior to WSN_Gateway_Behavior               │
 ├─────────────────────────────────────────────────────────────────────┤
 │  CH - Cluster Head (Tier 2)                                         │
-│    └── WSN_ClusterHead extends WSN_Node                            │
-│        ├── Single radio (Access)                                   │
-│        ├── Joins GWN via 6.0→6.1→6.2 handshake (receives localKey) │
-│        ├── OR joins other CH via 6.0→6.4 (no localKey)            │
-│        ├── Aggregates sensor data into 5.2 SENSOR_AGG             │
-│        ├── Receives 5.3 ACK from parent                           │
-│        └── Can recruit other CHs after verification               │
+│    └── WSN_ClusterHead extends WSN_Node                             │
+│        ├── Single radio (Access)                                    │
+│        ├── Joins GWN via 6.0→6.1→6.2 handshake (receives localKey)  │
+│        ├── OR joins other CH via 6.0→6.4 (no localKey)              │
+│        ├── Aggregates sensor data into 5.2 SENSOR_AGG               │
+│        ├── Receives 5.3 ACK from parent                             │
+│        └── Can recruit other CHs after verification                 │
 ├─────────────────────────────────────────────────────────────────────┤
 │  SENSOR (Tier 1)                                                    │
-│    └── WSN_Sensor extends WSN_Node                                 │
-│        ├── Single radio (Access)                                   │
-│        ├── Transmits Type 1 SENSOR_DATA to closest CH/GWN         │
-│        ├── No handshake - instantaneous parent adoption           │
-│        ├── Sleep mode between transmissions (low power)           │
-│        └── Priority 0-2 based on sensor value change percentage   │
+│    └── WSN_Sensor extends WSN_Node                                  │
+│        ├── Single radio (Access)                                    │
+│        ├── Transmits Type 1 SENSOR_DATA to closest CH/GWN           │
+│        ├── No handshake - instantaneous parent adoption             │
+│        ├── Sleep mode between transmissions (low power)             │
+│        └── Priority 0-2 based on sensor value change percentage     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,13 +54,15 @@ HIERARCHY (Bottom to Top):
 
 | Type | Name | Radio | Purpose | Subtypes |
 |------|------|-------|---------|----------|
-| 0 | HELLO | Access | Neighbor discovery (broadcast) | 0=unverified, flag.bit2=verified |
-| 1 | SENSOR_DATA | Access | Sensor→CH/GWN raw data | 0-3=priority levels |
-| 5 | CH_HELLO | Both | CH routing updates / Data aggregation | 0=CH_HELLO, 1=FWD, 2=SENSOR_AGG, 3=AGG_ACK |
-| 6 | CH_CMD | Access | CH↔GWN handshake | 0=CH_REQ, 1=CH_ACK, 2=KEY_ACK, 3=REJECT, 4=JOINOK, 5=INFO |
-| 7 | CMD | Backbone | GWN↔GWN FSM handshake | 0=PARENT_INIT, 1=REQ_JOIN, 2=ACK_JOIN, 3=REJECT, 4=GLOBAL_KEY, 5=ENC_HELLO, 6=DOWN, 7=UP |
-| 8 | TOKEN | Backbone | Backbone transmission control | 0=TOKEN_DOWN, 1=TOKEN_REQ, 2=PATH_COMPLETE, 3=TOKEN_KILL |
-| 9 | HEARTBEAT | Both | Mesh keepalive | 0=HB_BOOT, 1=HB_DISC, 2=placeholder, 3=ENC_HB |
+| 0    | HELLO | Access | Neighbor discovery (broadcast) | 0=unverified, flag.bit2=verified |
+| 1    | SENSOR_DATA | Access | Sensor→CH/GWN raw data | 0-3=priority levels |
+| 2    | PANIC | Access | Emergency/Anomaly alert (flood/unicast) | 0=ANOMALY, 1=BATTERY_CRIT, 
+2=INTRUSION, 3=LINK_LOSS |
+| 5    | CH_HELLO | Both | CH routing updates / Data aggregation | 0=CH_HELLO, 1=FWD, 2=SENSOR_AGG, 3=AGG_ACK |
+| 6    | CH_CMD | Access | CH↔GWN handshake | 0=CH_REQ, 1=CH_ACK, 2=KEY_ACK, 3=REJECT, 4=JOINOK, 5=INFO |
+| 7    | CMD | Backbone | GWN↔GWN FSM handshake | 0=PARENT_INIT, 1=REQ_JOIN, 2=ACK_JOIN, 3=REJECT, 4=GLOBAL_KEY, 5=ENC_HELLO, 6=DOWN, 7=UP |
+| 8    | TOKEN | Backbone | Backbone transmission control | 0=TOKEN_DOWN, 1=TOKEN_REQ, 2=PATH_COMPLETE, 3=TOKEN_KILL |
+| 9    | HEARTBEAT | Both | Mesh keepalive | 0=HB_BOOT, 1=HB_DISC, 2=placeholder, 3=ENC_HB |
 | 10-16 | RESERVED | - | Future: Alert, Census, Shutdown, Update | - |
 
 ### Message Frame Structure (Binary Serialized)
@@ -114,7 +116,6 @@ t=300+:    STABLE TOPOLOGY
 
 ### Key Timing Parameters (WSN_Config.m)
 
-```matlab
 BootSteps = 21              % GWN boot duration (3*AggressiveInterval)
 SetupTime = 200             % Hello discovery window
 HelloInterval = 500         % Heartbeat interval (stable)
@@ -195,7 +196,7 @@ BUFFER_PURGE_THRESHOLD = 19      % Purge oldest 5 at 19+ msgs
 - Type 7 (CMD): FSM handshake
 - Type 8 (TOKEN): Token protocol itself
 - Type 9 (HB): Heartbeats
-- Relay from children: Already encrypted, heading uplink
+- Relay messages from child GWNs: Already encrypted, heading uplink
 
 ---
 
@@ -547,5 +548,33 @@ The AI will use this specification to:
 ---
 
 *Document Version: 1.0*
-*Generated: 2026-01-30*
+*Generated: 2026-02-19*
 *Codebase: WSN7_MODULAR*
+
+---
+
+## Recent AI Engine Updates (2026-02-19)
+
+Summary of changes applied by the AI assistant during the recent debugging session.
+
+- **Clusterhead Topology**: `WSN_TopologyGenerator` now uses a grid+Poisson-like sampler with controlled perturbation to evenly distribute clusterheads inside the GWN hull while retaining a degree of randomness.
+- **Clusterhead Dynamic Voltage Scaling (DVS)**: `WSN_ClusterHead` implements DVS when all verified neighbors are exhausted: it scales TX power by `CH_DVS_SCALE_FACTOR` (bounded by `CH_DVS_MAX_POWER`), clears rejected neighbor lists and retries recruitment. After `CH_DVS_MAX_SCALE_ATTEMPTS` the CH may enter `STATE_DORMANT`.
+- **Sensor Orphan Mode & Extended Sleep**: `WSN_Sensor` now tracks consecutive failed recruitment attempts, enters an orphan extended-sleep mode (75% longer sleep, narrower wake window) when thresholds are exceeded, and broadcasts a LINK_LOSS panic when entering orphan mode.
+- **Panic Messages (Type 2)**: Introduced `MSG_TYPE_PANIC` with subtypes (ANOMALY, BATTERY_CRIT, INTRUSION, LINK_LOSS) and severity levels. Panic messages include TTL, priority and a payload [originalSrc, sensorValue, battery, timestamp]. Sensors and CHs perform UID-based deduplication and TTL-aware forwarding. CHs prioritize and forward panics toward parent/sink.
+- **Sensor RX Mode & Panic Handling**: Sensors default to `RX` while awake, can receive and forward panic messages, and use a trust-score stub (`getNeighborTrust`) to decide whether to forward.
+- **Configuration Constants**: Added relevant constants to `WSN_Config.m` (panic types, DVS parameters, orphan sleep factors, etc.).
+- **Trust Model Stub & Ideation**: Added a simple trust-score stub in sensors to be replaced by a full reputation model later; ideation on trust factors and Hello-encoded sleep scheduling documented separately in the debug notes.
+
+Affected files (implemented):
+
+- `WSN_TopologyGenerator.m` — Poisson/grid distribution + perturbation
+- `WSN_ClusterHead.m` — DVS logic, panic handling queue
+- `WSN_Sensor.m` — Orphan sleep mode, panic generation/forwarding, RX state
+- `WSN_Config.m` — New constants for DVS, panic, orphan behavior
+
+Notes & next steps:
+
+- The changes are conservative and limited to CH/Sensor behavior and topology generation; they do not alter GWN backbone token logic.
+- The trust model, Hello-based sleep scheduling hints, and any formal security policy for panic handling are documented as design notes and remain to be implemented.
+- Recommend running a short topology + smoke simulation (low node count) to visually validate CH placement, sensor clustering, orphan behavior, and panic floods.
+

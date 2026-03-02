@@ -166,6 +166,20 @@ classdef WSN_GUI_GlobalEventFeed < handle
                 return;
             end
             
+            % Type 2: Panic/Emergency
+            if m.type == 2
+                panicNames = {'PANIC', 'PANIC_RELAY', 'PANIC_ACK', 'PANIC_CANCEL'};
+                if m.subtype < numel(panicNames)
+                    txt = panicNames{m.subtype + 1};
+                else
+                    txt = 'PANIC';
+                end
+                if bitget(m.flag,1)
+                    txt = ['[ENC] ' txt];
+                end
+                return;
+            end
+            
             % CH_HELLO (Type 5) with subtypes
             if m.type == 5
                 if m.subtype == 2

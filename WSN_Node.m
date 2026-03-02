@@ -42,7 +42,7 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
 
             obj.neighborTable = struct( ...
                 'id',{},'lastSeen',{},'rssi',{}, ...
-                'trust',{},'commRange',{},'status',{}, ...
+                'TrustScore',{},'commRange',{},'status',{}, ...
                 'tier',{},'battery',{},'neighborCount',{},'isVerified',{});
         end
         function logTx(obj, msg, t)
@@ -141,7 +141,7 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
         % TIER OVERRIDE POINT
         % --------------------------------------------------
         function response = receiveImpl(obj, msg, t, rssi)
-            %#ok<INUSD>
+            %
             response = [];
         end
 

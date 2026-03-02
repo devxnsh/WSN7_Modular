@@ -7,6 +7,7 @@ classdef WSN_Config
         NodeCount = 100;
         FieldSize = [100, 100];
         CenterPos = [50, 50];
+        HelloRange = 80;         % Default radio range for HELLO messages (Sybil etc.)
 
         % --- TIERS ---
         TIER_SENSOR = 1; TIER_CH = 2; TIER_GWN = 3;
@@ -27,11 +28,30 @@ classdef WSN_Config
         % --- MESSAGE TYPES ---
         MSG_TYPE_HELLO = 0;  % Phase 2: Hello messages for neighbor discovery
         MSG_TYPE_SENSOR = 1; % Type 1: Sensor -> CH/GWN raw sensor data
+        MSG_TYPE_PANIC = 2;  % Type 2: PANIC signals (anomaly/emergency)
         MSG_TYPE_CH_HELLO = 5;  % CH_HELLO to Sink (routing update)
         MSG_TYPE_CH_CMD = 6;    % CH-GWN handshake (CH_REQ, CH_ACK, KEY_ACK, CH_REJECT)
         MSG_TYPE_CMD = 7;    % Handshake/routing
         MSG_TYPE_TOKEN = 8;  % Token passing (TOKEN_DOWN, TOKEN_REQ, PATH_COMPLETE)
         MSG_TYPE_HB = 9;     % Heartbeat
+        
+        % --- PANIC SUBTYPES (Type 2) ---
+        PANIC_SUB_ANOMALY = 0;       % 2.0 Sensor anomaly (threshold breach)
+        PANIC_SUB_BATTERY_CRIT = 1;  % 2.1 Critical battery level
+        PANIC_SUB_INTRUSION = 2;     % 2.2 Suspected intrusion/tampering
+        PANIC_SUB_LINK_LOSS = 3;     % 2.3 Link loss (orphan alert)
+        
+        % --- PANIC SEVERITY LEVELS ---
+        PANIC_SEV_LOW = 0;           % Forward to parent CH only (unicast)
+        PANIC_SEV_MEDIUM = 1;        % Multicast to nearby CHs
+        PANIC_SEV_HIGH = 2;          % Broadcast flood with TTL
+        PANIC_SEV_CRITICAL = 3;      % Maximum priority flood
+        
+        % --- PANIC CONFIG ---
+        PANIC_DEFAULT_TTL = 3;       % Default TTL for panic flood
+        PANIC_ANOMALY_THRESHOLD = 300; % % change to trigger anomaly panic (very rare - actual emergency)
+        PANIC_BATTERY_CRIT_LEVEL = 5;  % Battery % to trigger critical alert (near-death only)
+        PANIC_COOLDOWN = 500;          % Min TFs between panics from same node
         
         % --- SENSOR DATA SUBTYPES (Type 5) ---
         % 5.0 = CH_HELLO (existing)
@@ -91,6 +111,17 @@ classdef WSN_Config
         % --- CH RECRUITMENT TIMING ---
         CH_ACCESS_LOCK_TIMER = 4;   % Access radio lock duration for CH handshake
         CH_MAX_RETRIES = 5;         % Max retries per GWN for any CH
+        
+        % --- CH DYNAMIC VOLTAGE SCALING (DVS) ---
+        CH_DVS_ENABLED = true;              % Enable dynamic voltage scaling
+        CH_DVS_SCALE_FACTOR = 1.5;          % Power multiplier on scale-up
+        CH_DVS_MAX_POWER = 6.0;             % Maximum TX power for CH after scaling
+        CH_DVS_MAX_SCALE_ATTEMPTS = 2;      % Max times CH can scale up before dormant
+        
+        % --- SENSOR ORPHAN SLEEP MODE ---
+        SENSOR_ORPHAN_SLEEP_FACTOR = 0.75;  % 75% longer sleep when orphaned
+        SENSOR_ORPHAN_WAKE_WINDOW = 1;      % Narrower wake window when orphaned
+        SENSOR_NORMAL_WAKE_WINDOW = 4;      % Normal wake window duration
 
         % --- POWER (Constant) ---
         TxPower_Sensor = 1.0;
