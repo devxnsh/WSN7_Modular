@@ -443,6 +443,10 @@ stblAdj (NxN boolean) - Stable connectivity without fading
 □ Check token issuedAt vs deprecationTime
 □ Verify encryption flag matches message type
 □ Confirm multicast group membership for FF00
+□ Validate attack module initialization (if enabled)
+□ Check malicious node behavior matches intensity
+□ Verify ghost links and attack visualization
+□ Confirm ground truth logging for security tests
 ```
 
 ---
@@ -471,6 +475,9 @@ WSN7_MODULAR/
 ├── WSN_Protocol.m                # (Placeholder for protocol logic)
 ├── WSN_ProtocolFrames.m          # (Placeholder for frame types)
 │
+├── WSN_Attack.m                  # Attack simulation module
+├── WSN_Attack_Demo.m             # Attack demonstration script
+│
 ├── WSN_GUI.m                     # Main GUI coordinator
 ├── WSN_GUI_Topology.m            # Node circles, links, hull
 ├── WSN_GUI_GlobalEventFeed.m     # Packet log table
@@ -479,9 +486,332 @@ WSN7_MODULAR/
 ├── WSN_GUI_NetworkState.m        # Network table
 ├── WSN_GUI_SinkAnalytics.m       # Sink-specific graphs
 │
+├── test_hello_diagnostic.m       # Diagnostic test for Hello messages
 ├── SPECIFICATION.md              # Protocol specification document
 └── VERIFICATION_PHASE2.m         # Test/verification script
 ```
+
+---
+
+## ATTACK SIMULATION MODULE (WSN_Attack.m)
+
+### Overview
+The WSN_Attack module provides comprehensive network security testing capabilities by simulating various attack scenarios within the WSN simulation environment. This module enables controlled testing of network resilience and intrusion detection systems.
+
+### Attack Types (8 categories, intensity 1-10)
+
+| ID | Attack Type | Description | Behavior |
+|----|-------------|-------------|----------|
+| 0 | NONE | Normal operation | No malicious behavior |
+| 1 | FLOODING | Hello Flood | Broadcasts excessive Hello messages to drain resources |
+| 2 | PANIC_FLOOD | Fake emergency alerts | Injects false panic messages to cause network congestion |
+| 3 | SYBIL | Multiple identity impersonation | Node claims multiple false identities |
+| 4 | BLACKHOLE | Drop all data packets | Silently discards all received data messages |
+| 5 | WORMHOLE | False tunnel | Creates deceptive low-latency path between distant nodes |
+| 6 | GRAYHOLE | Selective forwarding | Drops packets selectively to avoid detection |
+| 7 | DENIAL_SLEEP | Vampire attack | Prevents sensors from sleeping to drain battery |
+
+### Intensity Scale
+
+```
+Intensity 1 (EASILY DETECTABLE):
+├── Aggressive, constant behavior
+├── Affects both Access and Backbone radios (GWN)
+├── High packet rates, obvious attack patterns
+└── Immediate detection by monitoring systems
+
+Intensity 10 (HARD TO DETECT):
+├── Subtle, intermittent behavior
+├── Affects only one radio randomly (GWN)
+├── Low attack rates mixed with normal behavior
+└── Hard to distinguish from network issues
+```
+
+### Attack Architecture
+
+```matlab
+WSN_Attack (Static Class)
+├── Data Storage (Persistent)
+│   ├── isMalicious[N] - Boolean array of malicious nodes
+│   ├── attackType[N] - Attack type per node (0-7)
+│   ├── intensity[N] - Intensity level per node (1-10)
+│   └── attackStartTime[N] - When attack begins
+│
+├── Attack State Tracking
+│   ├── floodingBurstRemaining[N] - Packets left in flood burst
+│   ├── sybilIdentities{N} - Multiple identities per node
+│   ├── wormholeEndpoints[] - Paired wormhole nodes
+│   └── denialLastWakeTick[N] - DoS cooldown tracking
+│
+├── Visual Tracking
+│   ├── ghostLinks[] - Dropped message visualization
+│   ├── dosTargets[] - DoS attack visualization
+│   └── Color coding for each attack type
+│
+└── Ground Truth Logging
+    └── Records all attack actions for IDS evaluation
+```
+
+### Key Methods
+
+#### Configuration
+```matlab
+WSN_Attack.init(numNodes)                          % Initialize attack system
+WSN_Attack.setMalicious(nodeIdx, type, intensity)  % Configure node as attacker
+WSN_Attack.clearMalicious(nodeIdx)                 % Remove attack configuration
+WSN_Attack.setWormholeEndpoints(nodeA, nodeB)      % Configure wormhole pair
+```
+
+#### Attack Decision Logic
+```matlab
+WSN_Attack.shouldDropBlackhole(nodeIdx, t)         % Blackhole drop decision
+WSN_Attack.shouldDropGrayhole(nodeIdx, t)          % Selective drop decision
+WSN_Attack.shouldSybilAdvertiseHello(nodeIdx, t)   % Sybil identity broadcast
+WSN_Attack.shouldPanicFlood(nodeIdx, t)            % Emergency flood decision
+WSN_Attack.shouldWormholeRelay(nodeIdx, t)         % Tunnel relay decision
+```
+
+#### Visual Support
+```matlab
+WSN_Attack.addGhostLink(src, dst, expiry, type)    % Track dropped messages
+WSN_Attack.getGhostLinks(t)                        % Get active ghost links
+WSN_Attack.addDoSTarget(src, dst, expiry)          % Track DoS targets
+```
+
+### Attack Color Coding (GUI Visualization)
+
+```
+Attack Message Colors:
+├── Flooding:     Hot Pink [1.0, 0.0, 0.5]
+├── Panic Flood:  Bright Red [1.0, 0.0, 0.0]
+├── Sybil:        Orange [1.0, 0.5, 0.0]
+├── Blackhole:    Dark Gray [0.2, 0.2, 0.2]
+├── Wormhole:     Purple [0.6, 0.0, 1.0]
+├── Grayhole:     Olive [0.7, 0.7, 0.3]
+└── Denial Sleep: Bright Yellow [1.0, 1.0, 0.0]
+
+Node Status Colors:
+├── Malicious nodes: Bright attack-specific colors
+├── Ghost links: Dashed red lines (dropped messages)
+└── DoS targets: Double lines (vampire attacks)
+```
+
+### Attack Implementation Details
+
+#### Hello Flood (Type 1)
+- Generates excessive Hello broadcasts
+- Configurable burst sizes based on intensity
+- Tracks collision counts and timing
+- Depletes neighbor resources
+
+#### Panic Flood (Type 2)
+- Injects false emergency messages (Type 2 PANIC)
+- Uses all panic subtypes (ANOMALY, BATTERY_CRIT, INTRUSION, LINK_LOSS)
+- Rate-limited by cooldown periods
+- Causes network-wide flooding
+
+#### Sybil Attack (Type 3)
+- Creates multiple fake identities per node
+- Staggered identity injection over time
+- Single radio constraint (one identity active)
+- Different tier types for each identity
+
+#### Blackhole (Type 4)
+- Silently drops all data packets
+- Maintains normal routing advertisements
+- Tracks drop statistics for analysis
+- Perfect packet elimination
+
+#### Wormhole (Type 5)
+- Creates false low-latency tunnel between nodes
+- Bandwidth and latency constraints
+- Delayed packet queue simulation
+- Deceptive routing optimization
+
+#### Grayhole (Type 6)
+- Selective packet dropping based on:
+  - Message type priority
+  - Source reputation
+  - Random selection (intensity-based)
+- Maintains plausible forwarding ratio
+
+#### Denial of Sleep (Type 7)
+- Prevents sensors from entering sleep mode
+- Sends wake packets during sleep windows
+- Cooldown management to avoid detection
+- Battery drain acceleration
+
+### Security Testing Integration
+
+The attack module integrates with the WSN simulation to enable:
+
+- **Ground Truth Recording**: All attack actions logged for IDS evaluation
+- **Real-time Visualization**: Attack messages and affected nodes highlighted
+- **Performance Impact**: Realistic resource consumption and timing effects
+- **Detection Evasion**: Intensity-based stealth capabilities
+
+### Attack Configuration via GUI
+
+```
+Control Deck → Attack Configuration:
+├── Target Node Selection (dropdown)
+├── Attack Mode Selection (8 types)
+├── Intensity Slider (1-10 scale)
+├── Wormhole Endpoint Pairing
+└── Attack Activation Controls
+```
+
+### Attack Demo Environment (WSN_Attack_Demo.m)
+
+#### Overview
+Self-contained attack pattern training environment with **warmup-then-attack** design:
+- **Warmup Phase**: 600 ticks of normal behavior (headless) establishes baseline
+- **Attack Phase**: GUI appears at t=0, one node turns malicious
+- **Standard GUI**: Same layout as WSN_GUI (stable, throttled updates)
+
+#### Simulation Timeline
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                     WARMUP PHASE (Headless)                        │
+│   t = 1 to 600: All nodes behave normally                          │
+│   - Builds neighbor tables                                         │
+│   - Establishes baseline traffic patterns                          │
+│   - Logs observations for ML training (Phase=0)                    │
+├────────────────────────────────────────────────────────────────────┤
+│                     ATTACK PHASE (GUI Visible)                     │
+│   t = 0 (displayed): Attack starts, GUI appears                    │
+│   - Center node (AAAA) turns malicious                            │
+│   - Neighbors observe attack patterns                              │
+│   - Logs observations with IsAnomalous=1 (Phase=1)                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### Demo Topology (Star Pattern)
+
+```
+                    ┌───────┐
+                    │  0002 │ (Observer T2)
+                    └───┬───┘
+        ┌───────┐       │       ┌───────┐
+        │  0001 │───────┼───────│  0003 │
+        │  T1   │       │       │  T3   │
+        └───────┘  ┌────┴────┐  └───────┘
+                   │  AAAA   │ ← ATTACKER (center)
+                   │   T3    │
+        ┌───────┐  └────┬────┘  ┌───────┐
+        │  0006 │───────┼───────│  0004 │
+        │  T1   │       │       │  T2   │
+        └───────┘       │       └───────┘
+                    ┌───┴───┐
+                    │  0005 │
+                    │  T3   │
+                    └───────┘
+```
+
+#### Standard GUI Layout
+
+```
+┌─────────────────────────────┬───────────────────────────────────────┐
+│                             │          NETWORK STATE TABLE          │
+│      NETWORK TOPOLOGY       │  ID | Tier | Batt | TX | RX | Status  │
+│   (stable node positions,   │  ─────────────────────────────────────│
+│    attack links animate)    │  AAAA  T3   95%    42   12  ATTACK    │
+│                             │  0001  T1   87%     8   15  NORMAL    │
+│                             │  ...                                  │
+├─────────────────────────────┼───────────────────┬───────────────────┤
+│                             │   NODE INSPECTOR  │   ATTACKER LOG    │
+│    SIMULATION STATUS        │   [Dropdown: ID]  │   t=5 [ATTACK]... │
+│                             │   Battery: 95%    │   t=10 [ATTACK]...│
+│  Time: t=50                 │   TX Count: 42    │   t=15 [ATTACK]...│
+│  Attack: FLOODING I=5       │   Neighbors: 6    │                   │
+│  Attacker Batt: 95%         │                   │                   │
+│  Avg Neighbor Batt: 85%     │   >>> ATTACKER    │                   │
+└─────────────────────────────┴───────────────────┴───────────────────┘
+```
+
+#### Usage Examples
+
+```matlab
+% Interactive menu
+WSN_Attack_Demo()
+
+% Hello Flood, intensity 5
+WSN_Attack_Demo(1, 5)
+
+% Blackhole with 8 neighbors, export CSV
+WSN_Attack_Demo(4, 7, 'neighbors', 8, 'export', true)
+
+% Custom warmup and attack duration
+WSN_Attack_Demo(3, 5, 'warmup', 800, 'duration', 500)
+```
+
+#### Node State (Inspectable)
+
+Each node tracks:
+- `battery`, `txPower` - Resource state
+- `txCount`, `rxCount` - Traffic counters
+- `lastTxTime`, `lastRxTime` - Timing
+- `neighborTable` - Known neighbors with RSSI
+- `log{}` - Full event log
+- `msgTypeHist[16]` - Message type histogram
+
+#### Training Data Export
+
+```matlab
+WSN_Attack_Demo(1, 5, 'export', true)
+% Generates: attack_data_flooding_I5_YYYYMMDD_HHMMSS.csv
+```
+
+CSV columns:
+| Column | Description |
+|--------|-------------|
+| Time | Simulation tick |
+| Phase | 0=warmup, 1=attack |
+| NeighborIdx | Observer node index |
+| RxFromAttacker | Messages from attacker |
+| RxTotal | Total messages received |
+| AvgRSSI | Average signal strength |
+| Battery | Current battery % |
+| NeighborCount | Known neighbors |
+| SpoofedIDs | Fake identities seen |
+| IsAnomalous | Ground truth label |
+
+---
+
+## DIAGNOSTIC UTILITIES
+
+### Test Scripts
+
+#### test_hello_diagnostic.m
+Comprehensive diagnostic utility for Hello message handling:
+
+```matlab
+% Purpose: Verify Hello broadcast delivery and processing
+Features:
+├── Message Creation Testing
+│   ├── Hello frame structure validation
+│   ├── Payload encoding/decoding verification
+│   └── Destination address handling
+│
+├── Reception Logic Testing
+│   ├── Broadcast filtering verification
+│   ├── Neighbor table update testing
+│   └── RSSI handling validation
+│
+├── Visualization Testing
+│   ├── Message classification verification
+│   ├── Color/line style assignment
+│   └── GUI integration testing
+│
+└── Output Analysis
+    ├── Detailed logging of all operations
+    ├── Before/after state comparison
+    └── Expected vs actual result validation
+```
+
+**Usage**: Run standalone to diagnose Hello message issues
+**Output**: Formatted test results with pass/fail indicators
 
 ---
 
@@ -525,6 +855,9 @@ When debugging, consider asking:
 5. **Token**: "Does X have a token? ID? Deprecation time?"
 6. **Neighbor**: "What does X's neighborTable look like? Verified?"
 7. **Message**: "What was the last message X sent/received? Checksum OK?"
+8. **Attack**: "Is node X malicious? What attack type and intensity?"
+9. **Security**: "Are there ghost links from X? DoS targets?"
+10. **Behavior**: "Does X's packet drop rate match expected attack behavior?"
 
 ---
 
@@ -547,8 +880,9 @@ The AI will use this specification to:
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 1.1*
 *Generated: 2026-02-19*
+*Last Updated: 2026-03-18*
 *Codebase: WSN7_MODULAR*
 
 ---
@@ -578,3 +912,36 @@ Notes & next steps:
 - The trust model, Hello-based sleep scheduling hints, and any formal security policy for panic handling are documented as design notes and remain to be implemented.
 - Recommend running a short topology + smoke simulation (low node count) to visually validate CH placement, sensor clustering, orphan behavior, and panic floods.
 
+---
+
+## Recent AI Engine Updates (2026-03-18)
+
+Summary of changes applied during the attack system documentation and demo development session.
+
+- **Attack Module Documentation**: Comprehensive documentation of `WSN_Attack.m` added, covering all 8 attack types (NONE, FLOODING, PANIC_FLOOD, SYBIL, BLACKHOLE, WORMHOLE, GRAYHOLE, DENIAL_SLEEP), intensity scaling, ground truth logging, and visual tracking features.
+
+- **WSN_Attack_Demo Script**: Redesigned as lightweight, self-contained training environment:
+  - **Independent of WSN_Main**: Own simulation loop and GUI
+  - **Star topology**: Attacker at center, observers in ring
+  - **Mixed tiers**: Neighbors can be any tier (Sensor, CH, GWN)
+  - **No hierarchy/chaining**: Direct message exchange, simplified physics
+  - **Training data export**: CSV with observation features per neighbor per tick
+  - **Features logged**: RxFromAttacker, RSSI, Battery, MsgRate, SpoofedIDs, etc.
+  - **Ground truth labels**: IsAnomalous flag for ML training
+
+- **File Structure Updates**: Documentation updated to reflect new attack-related files
+
+- **Debug Checklist Expansion**: Added security-specific debug items
+
+Usage:
+
+```matlab
+% Interactive selection
+WSN_Attack_Demo()
+
+% Flooding attack with training export
+WSN_Attack_Demo(1, 5, 'export', true)
+
+% Batch data generation (headless)
+WSN_Attack_Demo(4, 8, 'headless', true, 'neighbors', 10, 'duration', 500)
+```
