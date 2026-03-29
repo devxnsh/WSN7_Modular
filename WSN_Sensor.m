@@ -15,8 +15,8 @@ classdef WSN_Sensor < WSN_Node
         radioState = 'RX'          % 'RX', 'TX', 'SLEEP' - default RX when awake
         
         % --- PANIC HANDLING ---
-        lastPanicTime = -100       % Last time a panic was sent (cooldown)
-        panicCooldown = 20         % Min timeframes between panic signals
+        lastPanicTime = -1000      % Last time a panic was sent (cooldown)
+        panicCooldown = 500        % Min timeframes between panic signals (very rare)
         seenPanicUIDs = []         % UIDs of already-processed panic messages (dedup)
         
         % --- TRUST STUB (Placeholder for future trust model) ---
@@ -65,6 +65,44 @@ classdef WSN_Sensor < WSN_Node
         function msgs = step(obj, t, ~, ~)
             msgs = [];
             
+            % === ATTACK: FLOODING (Hello Flood) ===
+            % Malicious sensor broadcasts excessive HELLO messages with inflated TX power
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_FLOODING
+                floodCount = WSN_Attack.getFloodingBurstCount(obj.id, t);
+                if floodCount > 0
+                    % Temporarily inflate TX power for flooding
+                    originalPower = obj.txPower;
+                    obj.txPower = WSN_Attack.getFloodingTxPower(obj.id);
+                    
+                    % Broadcast multiple HELLO messages
+                    for fi = 1:floodCount
+                        floodMsg = obj.createHelloMessage(t);
+                        floodMsg.uid = randi(1e9);  % Unique ID per flood message
+                        msgs = [msgs, floodMsg];
+                        obj.addLog(sprintf('t=%d [HELLO_TX] bat=%d%% nbr=%d', ...
+                            t, uint8(obj.battery), numel(obj.neighborTable)));
+                    end
+                    
+                    % Restore original power
+                    obj.txPower = originalPower;
+                end
+            end
+            
+            % === ATTACK: PANIC FLOOD (Sinkhole Variant) ===
+            % Malicious sensor broadcasts fake emergency alerts
+            if WSN_Attack.isMaliciousNode(obj.id) && ...
+               WSN_Attack.getAttackType(obj.id) == WSN_Attack.ATTACK_PANIC_FLOOD
+                if WSN_Attack.shouldPanicFlood(obj.id, t)
+                    panicMsg = WSN_Attack.createFakePanicBeacon(obj.id, obj.hexID, t);
+                    if ~isempty(panicMsg)
+                        msgs = [msgs, panicMsg];
+                        obj.addLog(sprintf('t=%d [PANIC_TX] type=%d sev=%d', ...
+                            t, panicMsg.subtype, 2));
+                    end
+                end
+            end
+            
             % --- PHASE 2: HELLO BURST ---
             if t >= 0 && t == obj.nextHelloBurst
                 helloMsg = obj.createHelloMessage(t);
@@ -98,11 +136,24 @@ classdef WSN_Sensor < WSN_Node
                         obj.isOrphaned = false;
                         obj.orphanCheckCount = 0;
                         
-                        % Generate new sensor reading
-                        newValue = randi([0, 100]);
+                        % Generate new sensor reading (realistic: gradual drift with rare spikes)
+                        % Normal operation: small random walk around current value
+                        drift = randi([-5, 5]);  % Small drift: -5 to +5
+                        newValue = max(0, min(100, obj.prevSensorValue + drift));
+                        
+                        % Rare anomaly event: 0.5% chance of extreme spike (actual emergency)
+                        if rand() < 0.005
+                            % Extreme spike: jump to very high or very low value
+                            if rand() < 0.5
+                                newValue = randi([90, 100]);  % Spike high
+                            else
+                                newValue = randi([0, 10]);    % Spike low
+                            end
+                        end
                         
                         % === ANOMALY DETECTION ===
                         % Check for significant deviation from previous value
+                        % With gradual drift, this should ONLY trigger on actual spikes
                         anomalyDetected = false;
                         if obj.prevSensorValue > 0
                             pctChange = abs(newValue - obj.prevSensorValue) / obj.prevSensorValue * 100;
@@ -299,6 +350,27 @@ classdef WSN_Sensor < WSN_Node
                 return;
             end
             
+            % === ATTACK: BLACKHOLE/GRAYHOLE CHECK ===
+            % Malicious sensor may drop messages instead of processing/forwarding
+            if WSN_Attack.isMaliciousNode(obj.id)
+                attackType = WSN_Attack.getAttackType(obj.id);
+                if attackType == WSN_Attack.ATTACK_BLACKHOLE
+                    if WSN_Attack.shouldDropBlackhole(obj.id, t)
+                        % Log RX only - no forward/TX logged (stealth)
+                        obj.addLog(sprintf('t=%d [RX] type=%d.%d <- %s (no action)', ...
+                            t, msg.type, msg.subtype, dec2hex(uint16(msg.src), 4)));
+                        return;  % Drop message
+                    end
+                elseif attackType == WSN_Attack.ATTACK_GRAYHOLE
+                    if WSN_Attack.shouldDropGrayhole(obj.id, t)
+                        % Log RX only - no forward/TX logged (stealth)
+                        obj.addLog(sprintf('t=%d [RX] type=%d.%d <- %s (no action)', ...
+                            t, msg.type, msg.subtype, dec2hex(uint16(msg.src), 4)));
+                        return;  % Drop message selectively
+                    end
+                end
+            end
+            
             % Destination filtering for broadcast/multicast
             myID = hex2dec(obj.hexID);
             dst = msg.dst;
@@ -484,7 +556,7 @@ classdef WSN_Sensor < WSN_Node
             if isempty(idx)
                 obj.neighborTable(end+1) = struct( ...
                     'id', sender, 'lastSeen', t, 'rssi', rssi, ...
-                    'trust', 20, 'commRange', 0, 'status', 0, ...
+                    'TrustScore', 50, 'commRange', 0, 'status', 0, ...
                     'tier', tier, 'battery', battery, 'neighborCount', neighborCount, ...
                     'isVerified', senderVerified);
                 % Local log only for NEW neighbors

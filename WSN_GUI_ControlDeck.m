@@ -1,3 +1,4 @@
+%   % Suppress unused variable warnings - defensive initializations
 classdef WSN_GUI_ControlDeck < handle
     properties
         pnl
@@ -6,11 +7,13 @@ classdef WSN_GUI_ControlDeck < handle
         logBoxAccess     % HC12 Access radio log (green)
         txtTx, txtTTL
         sldAttackIntensity, txtAttackIntensityVal
+        txtAttackStartTime  % Start time input for delayed attacks
         btnFlood, menuAtk, menuExport
         lastSelectedNode = -1
         txtPosX, txtPosY
         globalEventFeed  % Reference to global event feed for CSV export
         nodesRef         % Reference to nodes array for CSV export
+        currentTick = 0  % Track simulation tick for pending/active status
     end
     
     methods
@@ -18,6 +21,90 @@ classdef WSN_GUI_ControlDeck < handle
             v = round(get(obj.sldAttackIntensity, 'Value'));
             set(obj.sldAttackIntensity, 'Value', v);   % snap to integer
             set(obj.txtAttackIntensityVal, 'String', num2str(v));
+        end
+        
+        function onNodeSelectionChanged(obj)
+            % Update attack dropdown to reflect selected node's malicious status
+            nodeIdx = get(obj.ddNodes, 'Value');
+            obj.updateAttackDropdownState(nodeIdx);
+        end
+        
+        function updateAttackDropdownState(obj, nodeIdx)
+            % Update attack dropdown appearance based on node's malicious status
+            % Orange = pending (before start time), Red = active, White = normal
+            %
+            % NOTE: We suppress the menuAtk callback while doing programmatic
+            % Value updates so that handleAttackSelection() is not triggered
+            % before the intensity slider has been synced – which was the root
+            % cause of intensity values being silently overwritten by the
+            % slider's stale default.
+            savedCb = get(obj.menuAtk, 'Callback');
+            set(obj.menuAtk, 'Callback', []);  % suppress callback during sync
+
+            if WSN_Attack.isMaliciousNode(nodeIdx)
+                % Node is malicious - get status
+                attackType = WSN_Attack.getAttackType(nodeIdx);
+                guiIdx = WSN_Attack.attackTypeToGuiIndex(attackType);
+                startTime = WSN_Attack.getStartTime(nodeIdx);
+
+                % --- sync intensity first so the slider is correct BEFORE
+                %     the dropdown Value is restored and callbacks re-enabled ---
+                intensity = WSN_Attack.getIntensity(nodeIdx);
+                set(obj.sldAttackIntensity, 'Value', intensity);
+                set(obj.txtAttackIntensityVal, 'String', num2str(intensity));
+
+                set(obj.menuAtk, 'Value', guiIdx);
+
+                % Check if attack is pending (not yet active)
+                if startTime > 0 && obj.currentTick < startTime
+                    % PENDING - orange background
+                    set(obj.menuAtk, 'BackgroundColor', [1.0 0.85 0.4]);  % Orange tint
+                    set(obj.menuAtk, 'TooltipString', sprintf('PENDING: Activates at t=%d', startTime));
+                else
+                    % ACTIVE - red background
+                    set(obj.menuAtk, 'BackgroundColor', [1.0 0.6 0.6]);  % Red tint
+                    set(obj.menuAtk, 'TooltipString', 'ACTIVE');
+                end
+
+                % Update start time field if present
+                if ~isempty(obj.txtAttackStartTime)
+                    set(obj.txtAttackStartTime, 'String', num2str(startTime));
+                end
+            else
+                % Node is normal - reset to white background, Normal selection
+                set(obj.menuAtk, 'Value', 1);  % "Normal"
+                set(obj.menuAtk, 'BackgroundColor', [1.0 1.0 1.0]);  % White
+                set(obj.menuAtk, 'TooltipString', '');
+
+                % Clear start time field
+                if ~isempty(obj.txtAttackStartTime)
+                    set(obj.txtAttackStartTime, 'String', '0');
+                end
+            end
+
+            set(obj.menuAtk, 'Callback', savedCb);  % restore callback
+        end
+        
+        function handleAttackSelection(obj, nodes)
+            % Get selected node index
+            nodeIdx = get(obj.ddNodes, 'Value');
+            
+            % Get attack type from dropdown (1=Normal, 2=HelloFlood, etc.)
+            guiIdx = get(obj.menuAtk, 'Value');
+            
+            % Convert GUI index to attack type constant
+            attackType = WSN_Attack.guiIndexToAttackType(guiIdx);
+            
+            % Get intensity from slider
+            intensity = round(get(obj.sldAttackIntensity, 'Value'));
+            
+            % Apply attack (Sink protection handled inside setMalicious)
+            success = WSN_Attack.setMalicious(nodeIdx, attackType, intensity, nodes);
+            
+            % Visual feedback - reset dropdown if attack was blocked (Sink)
+            if ~success && attackType ~= 0
+                set(obj.menuAtk, 'Value', 1);  % Reset to 'Normal'
+            end
         end
 
         function obj = WSN_GUI_ControlDeck(parentTab, nodes)
@@ -39,7 +126,8 @@ classdef WSN_GUI_ControlDeck < handle
             end
             
             obj.ddNodes = uicontrol('Parent', obj.pnl, 'Style', 'popupmenu', ...
-                'String', nodeNames, 'Units', 'normalized', 'Position', [0.10 0.91 0.10 0.08]);
+                'String', nodeNames, 'Units', 'normalized', 'Position', [0.10 0.91 0.10 0.08], ...
+                'Callback', @(s,e) obj.onNodeSelectionChanged());
             
             obj.inspectSummary = uicontrol('Parent', obj.pnl, 'Style', 'edit', ...
                 'Units', 'normalized', 'Position', [0.02 0.05 0.26 0.83], ...
@@ -163,14 +251,32 @@ classdef WSN_GUI_ControlDeck < handle
                     'Wormhole', ...
                     'Selective Forwarding', ...
                     'Denial of Sleep (Vampire)'}, ...
-                'Units', 'normalized', 'Position', [0.68 0.27 0.23 0.07]);
+                'Units', 'normalized', 'Position', [0.68 0.27 0.23 0.07], ...
+                'Callback', @(s,e)obj.handleAttackSelection(nodes));
 
             %% ---------------- ROW 5 ----------------
+            % Attack Start Time Input
+            uicontrol('Parent', obj.pnl, 'Style', 'text', ...
+                'String', 'START @t=', ...
+                'Units', 'normalized', ...
+                'Position', [0.68 0.20 0.10 0.06], ...
+                'BackgroundColor', [0.94 0.94 0.94], ...
+                'HorizontalAlignment', 'right', ...
+                'FontWeight', 'bold', ...
+                'FontSize', 8);
+            
+            obj.txtAttackStartTime = uicontrol('Parent', obj.pnl, 'Style', 'edit', ...
+                'String', '0', ...
+                'Units', 'normalized', 'Position', [0.79 0.20 0.12 0.06], ...
+                'TooltipString', 'Activation tick (0=immediate)', ...
+                'Callback', @(s,e)obj.handleStartTimeChange(nodes));
+
+            %% ---------------- ROW 6 ----------------
             % Export CSV Dropdown
             uicontrol('Parent', obj.pnl, 'Style', 'text', ...
                 'String', 'EXPORT:', ...
                 'Units', 'normalized', ...
-                'Position', [0.68 0.15 0.08 0.07], ...
+                'Position', [0.68 0.10 0.08 0.07], ...
                 'BackgroundColor', [0.94 0.94 0.94], ...
                 'HorizontalAlignment', 'right', ...
                 'FontWeight', 'bold');
@@ -182,13 +288,31 @@ classdef WSN_GUI_ControlDeck < handle
                     'Selected Node Log', ...
                     'Complete Logs (All)', ...
                     'Sink Node Log Only'}, ...
-                'Units', 'normalized', 'Position', [0.77 0.16 0.18 0.07], ...
+                'Units', 'normalized', 'Position', [0.77 0.10 0.18 0.07], ...
                 'BackgroundColor', [0.7 0.9 0.7], ...
                 'FontWeight', 'bold', ...
                 'Callback', @(s,e) obj.handleExport());
             
             % Store reference to nodes for export
             obj.nodesRef = nodes;
+        end
+        
+        function handleStartTimeChange(obj, nodes) %
+            % Update attack start time for selected node
+            % nodes argument kept for callback signature consistency
+            nodeIdx = get(obj.ddNodes, 'Value');
+            startTime = str2double(get(obj.txtAttackStartTime, 'String'));
+            
+            if isnan(startTime) || startTime < 0
+                startTime = 0;
+                set(obj.txtAttackStartTime, 'String', '0');
+            end
+            
+            % Only update if node is configured as malicious
+            if WSN_Attack.isMaliciousNode(nodeIdx)
+                WSN_Attack.setStartTime(nodeIdx, startTime);
+                obj.updateAttackDropdownState(nodeIdx);
+            end
         end
         
         function updateScale(obj, nodes)
@@ -205,6 +329,9 @@ classdef WSN_GUI_ControlDeck < handle
         function update(obj, nodes, t)
             idx = get(obj.ddNodes, 'Value'); if isempty(idx), return; end
             
+            % Track current simulation tick for pending/active attack status
+            obj.currentTick = t;
+            
             % Safety check for topology resizing
             if idx > numel(nodes), idx = 1; set(obj.ddNodes, 'Value', 1); end
             
@@ -218,7 +345,15 @@ classdef WSN_GUI_ControlDeck < handle
                 set(obj.txtPosX, 'String', sprintf('%.2f', n.pos(1)));
                 set(obj.txtPosY, 'String', sprintf('%.2f', n.pos(2)));
 
+                % Update attack dropdown state when node selection changes
+                obj.updateAttackDropdownState(idx);
+                
                 obj.lastSelectedNode = idx;
+            else
+                % Refresh attack status periodically (for pending->active transition)
+                if mod(t, 10) == 0
+                    obj.updateAttackDropdownState(idx);
+                end
             end
 
             % --- ROBUST PROPERTY ACCESS (Crash Prevention) ---
@@ -800,9 +935,10 @@ classdef WSN_GUI_ControlDeck < handle
             end
         end
         
-        function csvLine = parseLogEntry(obj, entry, radioType, n)
+        function csvLine = parseLogEntry(obj, entry, radioType, n) %
             % Parse a log entry string into CSV format
             % If n is provided, include node state fields
+            % obj is retained for method consistency
             
             entry = char(entry);
             

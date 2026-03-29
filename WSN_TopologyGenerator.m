@@ -25,7 +25,7 @@ classdef WSN_TopologyGenerator
                     cand = [x + offset(1), y + offset(2)];
                     if all(cand >= 1) && all(cand <= field) && ...
                        inpolygon(cand(1), cand(2), hullX, hullY)
-                        gridPoints = [gridPoints; cand]; %#ok<AGROW>
+                        gridPoints = [gridPoints; cand]; %
                     end
                 end
             end
@@ -51,7 +51,7 @@ classdef WSN_TopologyGenerator
                             % Check minimum distance to existing points
                             dists = vecnorm(positions - cand, 2, 2);
                             if all(dists > cellSize/2)
-                                positions = [positions; cand]; %#ok<AGROW>
+                                positions = [positions; cand]; %
                                 placed = true;
                             end
                         end
@@ -61,7 +61,7 @@ classdef WSN_TopologyGenerator
                         % Force placement if still needed
                         cand = rand(1,2) .* [maxX-minX, maxY-minY] + [minX, minY];
                         if inpolygon(cand(1), cand(2), hullX, hullY)
-                            positions = [positions; cand]; %#ok<AGROW>
+                            positions = [positions; cand]; %
                         end
                     end
                 end
@@ -75,7 +75,7 @@ classdef WSN_TopologyGenerator
             gwnPos = [];
             for i = 1:numel(nodes)
                 if isprop(nodes(i),'tier') && nodes(i).tier == WSN_Config.TIER_GWN
-                    gwnPos(end+1,:) = nodes(i).pos; %#ok<AGROW>
+                    gwnPos(end+1,:) = nodes(i).pos; %
                 end
             end
 
@@ -144,13 +144,20 @@ classdef WSN_TopologyGenerator
                 hullIdx = [];
             end
 
-            % sort demotion candidates (closest first)
+            % sort demotion candidates (closest first, non-hull preferred)
             demotable = setdiff(1:throwGWNs, hullIdx);
             [~,ord] = sort(dists(demotable),'ascend');
             demotable = demotable(ord);
 
+            % fallback: if demotable too small, append hull nodes (closest first)
+            if numel(demotable) < (throwGWNs - targetGWNs)
+                hullSorted = hullIdx(~ismember(hullIdx, demotable));
+                [~,hord] = sort(dists(hullSorted),'ascend');
+                demotable = [demotable; hullSorted(hord)];
+            end
+
             ptr = 1;
-            while sum([nodes(1:throwGWNs).tier] == 3) > targetGWNs
+            while sum([nodes(1:throwGWNs).tier] == 3) > targetGWNs && ptr <= numel(demotable)
                 k = demotable(ptr);
                 nodes(k).tier = 2;
                 nodes(k).type = 'CH';

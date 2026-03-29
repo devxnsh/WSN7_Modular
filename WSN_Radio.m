@@ -271,6 +271,8 @@ classdef WSN_Radio < handle
     methods
         function p = getPriority(obj, msg)
             % Priority depends on radio type
+            % RULE: Type 0 (HELLO), Type 1 (SENSOR), Type 2 (PANIC) have EQUAL
+            %       priority on Access radio - simultaneous arrivals arbitrated by RSSI
             if strcmp(obj.radioType, 'BACKBONE')
                 % Backbone (LoRa): Type 7 > Type 8 > Type 5 > Type 9
                 % Within Type 8: 8.0 TOKEN_DOWN > 8.1 TOKEN_REQ > 8.2 > 8.3
@@ -287,16 +289,17 @@ classdef WSN_Radio < handle
                     p = 10;
                 end
             else
-                % Access (HC12): Type 6 > Type 5 > Type 1 = Type 0
-                % Priority order: 6 > 5 > 1 = 0
+                % Access (HC12): Priority order for arbitration
+                % Type 6 (CH_CMD) > Type 5 (CH_HELLO/AGG) > Type 0/1/2 (equal)
+                % When Type 0, 1, 2 arrive simultaneously, RSSI breaks the tie
                 if msg.type == 6
                     p = 3;      % CH_CMD (recruitment) - highest
                 elseif msg.type == 5
                     p = 2;      % CH_HELLO / SENSOR_AGG
-                elseif msg.type == 1
-                    p = 1;      % Sensor data (Type 1)
-                elseif msg.type == 0
-                    p = 1;      % Hello (same priority as Type 1)
+                elseif msg.type == 0 || msg.type == 1 || msg.type == 2
+                    % HELLO (0), SENSOR (1), PANIC (2) have SAME priority
+                    % Simultaneous arrivals: RSSI arbitration in pushRX()
+                    p = 1;
                 else
                     p = 0;
                 end

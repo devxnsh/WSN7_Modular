@@ -33,8 +33,15 @@ classdef WSN_Sink < WSN_Gateway
         % Children inherit NOT(phaseOffset) during GLOBAL_KEY handshake
         
         % -------- SENSOR REGISTRY (Timeseries) --------
-        sensorRegistry = struct('id',{}, 'hexID',{}, 'parentCH',{}, 'timeseries',{})
+        sensorRegistry = struct('id',{}, 'hexID',{}, 'parentCH',{}, 'timeseries',{}, 'TrustScore',{})
         % timeseries: struct array with fields: time, value, rssi, battery
+        
+        % -------- GLOBAL TRUST REGISTRY --------
+        % Consolidated trust scores for ALL nodes the Sink knows about
+        % Sources: neighborTable, nodeRegistry, sensorRegistry
+        globalTrustRegistry = struct('id',{}, 'hexID',{}, 'nodeType',{}, 'TrustScore',{}, ...
+                                     'lastUpdate',{}, 'packetsReceived',{}, 'anomalyCount',{})
+        % nodeType: 'GWN', 'CH', 'SENSOR', 'NEIGHBOR'
     end
 
     % =========================================================
@@ -65,6 +72,16 @@ classdef WSN_Sink < WSN_Gateway
                 'chChildren',{}, ...
                 'secondaryChildren',{}, ...
                 'lastUpdate',{} );
+            
+            % Initialize global trust registry
+            obj.globalTrustRegistry = struct( ...
+                'id',{}, ...
+                'hexID',{}, ...
+                'nodeType',{}, ...
+                'TrustScore',{}, ...
+                'lastUpdate',{}, ...
+                'packetsReceived',{}, ...
+                'anomalyCount',{} );
         end
     end
 
@@ -617,13 +634,22 @@ classdef WSN_Sink < WSN_Gateway
                     'parentCH', hex2dec(obj.hexID), ... % Direct to Sink
                     'routeHistory', {{'SINK(direct)'}}, ...
                     'rssiQuality', directQuality, ...
+                    'TrustScore', 50, ... % Default trust for new sensor
                     'timeseries', struct('time', t, 'value', sensorValue, ...
                                         'rssi', rssi, 'battery', sensorBattery));
                 if isempty(obj.sensorRegistry)
                     obj.sensorRegistry = newEntry;
                 else
+                    % Ensure TrustScore field exists before appending
+                    if ~isfield(obj.sensorRegistry, 'TrustScore')
+                        [obj.sensorRegistry.TrustScore] = deal(50);
+                    end
                     obj.sensorRegistry(end+1) = newEntry;
                 end
+                
+                % Update global trust registry
+                obj.updateGlobalTrust(sender, senderHex, 'SENSOR', t, true);
+                
                 obj.addLog(sprintf('t=%d [SENSOR_DIRECT] NEW %s [%s] val=%d bat=%d%% rssi=%.1f', ...
                     t, senderHex, directQuality, sensorValue, sensorBattery, rssi));
             else
@@ -631,6 +657,15 @@ classdef WSN_Sink < WSN_Gateway
                 newPoint = struct('time', t, 'value', sensorValue, ...
                                  'rssi', rssi, 'battery', sensorBattery);
                 obj.sensorRegistry(idx).timeseries(end+1) = newPoint;
+                
+                % Increment trust for successful data reception
+                if ~isfield(obj.sensorRegistry, 'TrustScore')
+                    [obj.sensorRegistry.TrustScore] = deal(50);
+                end
+                obj.sensorRegistry(idx).TrustScore = min(100, obj.sensorRegistry(idx).TrustScore + 1);
+                
+                % Update global trust registry
+                obj.updateGlobalTrust(sender, dec2hex(uint16(sender), 4), 'SENSOR', t, true);
                 
                 % Update RSSI quality (ensure field exists)
                 if rssi > -50
@@ -719,9 +754,9 @@ classdef WSN_Sink < WSN_Gateway
                 
                 % Track for summary
                 if ~isempty(groupSummary)
-                    groupSummary = [groupSummary ', ']; %#ok<AGROW>
+                    groupSummary = [groupSummary ', ']; %
                 end
-                groupSummary = [groupSummary sprintf('%s:%d', qualityLabel(1:3), numInGroup)]; %#ok<AGROW>
+                groupSummary = [groupSummary sprintf('%s:%d', qualityLabel(1:3), numInGroup)]; %
                 
                 senderHex = dec2hex(uint16(originalSender), 4);
                 
@@ -760,17 +795,25 @@ classdef WSN_Sink < WSN_Gateway
                             'parentCH', originalSender, ...
                             'routeHistory', {{senderHex}}, ...
                             'rssiQuality', qualityLabel, ...
+                            'TrustScore', 50, ... % Default trust for new sensor
                             'timeseries', struct('time', sensorTime, 'value', sensorValue, ...
                                                 'rssi', sensorRSSI, 'battery', sensorBattery));
                         if isempty(obj.sensorRegistry)
                             obj.sensorRegistry = newEntry;
                         else
-                            % Ensure rssiQuality field exists in existing entries before appending
+                            % Ensure TrustScore and rssiQuality fields exist before appending
                             if ~isfield(obj.sensorRegistry, 'rssiQuality')
                                 [obj.sensorRegistry.rssiQuality] = deal('UNKNOWN');
                             end
+                            if ~isfield(obj.sensorRegistry, 'TrustScore')
+                                [obj.sensorRegistry.TrustScore] = deal(50);
+                            end
                             obj.sensorRegistry(end+1) = newEntry;
                         end
+                        
+                        % Update global trust registry for new sensor
+                        obj.updateGlobalTrust(sensorID, sensorHex, 'SENSOR', t, true);
+                        
                         obj.addLog(sprintf('t=%d [5.2_RX] NEW sensor %s [%s] val=%d bat=%d%% rssi=%ddBm via %s', ...
                             t, sensorHex, qualityLabel, sensorValue, sensorBattery, sensorRSSI, senderHex));
                     else
@@ -778,6 +821,15 @@ classdef WSN_Sink < WSN_Gateway
                         newPoint = struct('time', sensorTime, 'value', sensorValue, ...
                                          'rssi', sensorRSSI, 'battery', sensorBattery);
                         obj.sensorRegistry(idx).timeseries(end+1) = newPoint;
+                        
+                        % Increment trust for successful data reception
+                        if ~isfield(obj.sensorRegistry, 'TrustScore')
+                            [obj.sensorRegistry.TrustScore] = deal(50);
+                        end
+                        obj.sensorRegistry(idx).TrustScore = min(100, obj.sensorRegistry(idx).TrustScore + 1);
+                        
+                        % Update global trust registry
+                        obj.updateGlobalTrust(sensorID, sensorHex, 'SENSOR', t, true);
                         
                         % Update RSSI quality (ensure field exists first)
                         if ~isfield(obj.sensorRegistry, 'rssiQuality')
@@ -818,6 +870,119 @@ classdef WSN_Sink < WSN_Gateway
             
             obj.addLog(sprintf('t=%d [5.2_RX] Aggregated %d sensors from %s (via %s) | Groups: [%s]', ...
                 t, totalSensors, dec2hex(uint16(originalSender), 4), dec2hex(uint16(sender), 4), groupSummary));
+            
+            % Update global trust for aggregating GWN
+            obj.updateGlobalTrust(originalSender, dec2hex(uint16(originalSender), 4), 'GWN', t, true);
+        end
+    end
+    
+    % =========================================================
+    % GLOBAL TRUST REGISTRY METHODS
+    % =========================================================
+    methods
+        function updateGlobalTrust(obj, nodeID, hexID, nodeType, t, isSuccess)
+            % Update or create entry in globalTrustRegistry
+            % isSuccess: true = increase trust, false = record anomaly
+            
+            idx = find([obj.globalTrustRegistry.id] == nodeID, 1);
+            
+            if isempty(idx)
+                % New node - create entry with default trust
+                newEntry = struct( ...
+                    'id', nodeID, ...
+                    'hexID', hexID, ...
+                    'nodeType', nodeType, ...
+                    'TrustScore', 50, ...
+                    'lastUpdate', t, ...
+                    'packetsReceived', 1, ...
+                    'anomalyCount', 0);
+                if isempty(obj.globalTrustRegistry)
+                    obj.globalTrustRegistry = newEntry;
+                else
+                    obj.globalTrustRegistry(end+1) = newEntry;
+                end
+            else
+                % Update existing entry
+                obj.globalTrustRegistry(idx).lastUpdate = t;
+                obj.globalTrustRegistry(idx).packetsReceived = obj.globalTrustRegistry(idx).packetsReceived + 1;
+                
+                if isSuccess
+                    % Increase trust (max 100), slower increase at higher trust
+                    currentTrust = obj.globalTrustRegistry(idx).TrustScore;
+                    increment = max(0.5, 2 - currentTrust / 50);  % 2 at trust=0, 0.5 at trust=100
+                    obj.globalTrustRegistry(idx).TrustScore = min(100, currentTrust + increment);
+                else
+                    % Record anomaly and decrease trust
+                    obj.globalTrustRegistry(idx).anomalyCount = obj.globalTrustRegistry(idx).anomalyCount + 1;
+                    decrement = 5;  % Anomalies hurt more than good behavior helps
+                    obj.globalTrustRegistry(idx).TrustScore = max(0, ...
+                        obj.globalTrustRegistry(idx).TrustScore - decrement);
+                end
+            end
+        end
+        
+        function trust = getGlobalTrust(obj, nodeID)
+            % Get trust score for a node from global registry
+            % Returns default 50 if node not found
+            trust = 50;
+            if isempty(obj.globalTrustRegistry)
+                return;
+            end
+            idx = find([obj.globalTrustRegistry.id] == nodeID, 1);
+            if ~isempty(idx)
+                trust = obj.globalTrustRegistry(idx).TrustScore;
+            end
+        end
+        
+        function summary = getGlobalTrustSummary(obj)
+            % Get summary statistics for all tracked nodes
+            summary = struct();
+            summary.totalNodes = 0;
+            summary.avgTrust = 50;
+            summary.lowTrustNodes = {};
+            summary.highTrustNodes = {};
+            
+            if isempty(obj.globalTrustRegistry)
+                return;
+            end
+            
+            summary.totalNodes = numel(obj.globalTrustRegistry);
+            summary.avgTrust = mean([obj.globalTrustRegistry.TrustScore]);
+            
+            % Find low trust nodes (below 30)
+            lowIdx = [obj.globalTrustRegistry.TrustScore] < 30;
+            if any(lowIdx)
+                summary.lowTrustNodes = {obj.globalTrustRegistry(lowIdx).hexID};
+            end
+            
+            % Find high trust nodes (above 80)
+            highIdx = [obj.globalTrustRegistry.TrustScore] > 80;
+            if any(highIdx)
+                summary.highTrustNodes = {obj.globalTrustRegistry(highIdx).hexID};
+            end
+        end
+        
+        function count = getActiveSensorsCount(obj, t, windowSize)
+            % Get count of sensors that have reported within the specified time window
+            % This gives a better "sensors tracked" metric than total sensors
+            if nargin < 3
+                windowSize = 50;  % Default: sensors active in last 50 ticks
+            end
+            
+            count = 0;
+            if isempty(obj.sensorRegistry)
+                return;
+            end
+            
+            for i = 1:numel(obj.sensorRegistry)
+                s = obj.sensorRegistry(i);
+                if ~isempty(s.timeseries)
+                    latestTime = s.timeseries(end).time;
+                    if (t - latestTime) <= windowSize
+                        count = count + 1;
+                    end
+                end
+            end
         end
     end
 end

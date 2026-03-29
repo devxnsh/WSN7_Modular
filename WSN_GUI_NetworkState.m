@@ -75,11 +75,11 @@ classdef WSN_GUI_NetworkState < handle
                     for cid = childIds
                         cIdx = id2idx(cid);
                         if ~isempty(cIdx)
-                            hx{end+1} = nodes(cIdx).hexID; %#ok<AGROW>
+                            hx{end+1} = nodes(cIdx).hexID; %
                         end
                     end
                     if ~isempty(hx)
-                        childParts{end+1} = strjoin(hx, ', '); %#ok<AGROW>
+                        childParts{end+1} = strjoin(hx, ', '); %
                     end
                 end
                 
@@ -90,26 +90,11 @@ classdef WSN_GUI_NetworkState < handle
                     for cid = chIds
                         cIdx = id2idx(cid);
                         if ~isempty(cIdx)
-                            hx{end+1} = sprintf('[%s]', nodes(cIdx).hexID); %#ok<AGROW>
+                            hx{end+1} = sprintf('[%s]', nodes(cIdx).hexID); %
                         end
                     end
                     if ~isempty(hx)
-                        childParts{end+1} = strjoin(hx, ', '); %#ok<AGROW>
-                    end
-                end
-                
-                % Secondary CH children (with double brackets)
-                if isprop(n,'secondaryChildren') && ~isempty(n.secondaryChildren)
-                    hx = {};
-                    secIds = n.secondaryChildren(:)';  % Ensure row vector
-                    for cid = secIds
-                        cIdx = id2idx(cid);
-                        if ~isempty(cIdx)
-                            hx{end+1} = sprintf('[[%s]]', nodes(cIdx).hexID); %#ok<AGROW>
-                        end
-                    end
-                    if ~isempty(hx)
-                        childParts{end+1} = strjoin(hx, ', '); %#ok<AGROW>
+                        childParts{end+1} = strjoin(hx, ', '); %
                     end
                 end
                 
@@ -126,14 +111,14 @@ classdef WSN_GUI_NetworkState < handle
                                 for gcid = gcIds
                                     gcIdx = id2idx(gcid);
                                     if ~isempty(gcIdx)
-                                        hx{end+1} = sprintf('[[%s]]', nodes(gcIdx).hexID); %#ok<AGROW>
+                                        hx{end+1} = sprintf('[[%s]]', nodes(gcIdx).hexID); %
                                     end
                                 end
                             end
                         end
                     end
                     if ~isempty(hx)
-                        childParts{end+1} = strjoin(hx, ', '); %#ok<AGROW>
+                        childParts{end+1} = strjoin(hx, ', '); %
                     end
                 end
                 
@@ -148,7 +133,7 @@ classdef WSN_GUI_NetworkState < handle
                     for nid = [n.neighborTable.id]
                         nIdx = id2idx(nid);
                         if ~isempty(nIdx)
-                            hx{end+1} = nodes(nIdx).hexID; %#ok<AGROW>
+                            hx{end+1} = nodes(nIdx).hexID; %
                         end
                     end
                     if ~isempty(hx)

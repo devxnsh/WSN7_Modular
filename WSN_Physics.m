@@ -140,9 +140,9 @@ classdef WSN_Physics
             nbrs = nbrs(sortIdx);
 
             lines = strings(0);
-            % Header: ID (5 chars with star space), D (4 chars), Tr, Bat, Nb, Age
-            lines(end+1) = sprintf(' ID  | D   |Tr|Bat|Nb|Age');
-            lines(end+1) = repmat('-', 1, 28);
+            % Header: ID (5 chars with star space), D (4 chars), Tr, Bat, Nb, Age, Trust
+            lines(end+1) = sprintf(' ID  | D   |Tr|Bat|Nb|Age|TS');
+            lines(end+1) = repmat('-', 1, 31);
 
             for k = 1:numel(nbrs)
 
@@ -203,14 +203,20 @@ classdef WSN_Physics
                     idStr = sprintf('%s ', tHex);
                 end
                 
-                % Extract tier, battery, neighborCount from neighbor table
+                % Extract tier, battery, neighborCount, trustScore from neighbor table
                 tierVal = nbrs(k).tier;
                 batVal = nbrs(k).battery;
                 nbrCountVal = nbrs(k).neighborCount;
+                
+                % Get trust score (default 50 if not set)
+                trustVal = 50;
+                if isfield(nbrs, 'TrustScore') && ~isempty(nbrs(k).TrustScore)
+                    trustVal = nbrs(k).TrustScore;
+                end
 
-                % Format: ID(5) | D(4.1) | Tr(1) | Bat(2) | Nb(2) | Age(3)
-                lines(end+1) = sprintf('%s|%4.1f| %d|%2d|%2d|%3ds', ...
-                    idStr, estDist, tierVal, batVal, nbrCountVal, age);
+                % Format: ID(5) | D(4.1) | Tr(1) | Bat(2) | Nb(2) | Age(3) | TS(2)
+                lines(end+1) = sprintf('%s|%4.1f| %d|%2d|%2d|%3ds|%2d', ...
+                    idStr, estDist, tierVal, batVal, nbrCountVal, age, trustVal);
             end
 
             str = char(join(lines, newline));

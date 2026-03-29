@@ -43,7 +43,6 @@ classdef WSN_Gateway < WSN_Node
         
         % -------- CH CHILDREN (separate from GWN children) --------
         chChildren = []          % List of recruited CH IDs
-        secondaryChildren = []   % List of secondary CH IDs recruited by our CHs
         chLocalKeys = containers.Map()  % Map of CH hexID to local key
         % Pending children: awaiting ENC_HELLO confirmation (secure handshake)
         % Struct array: {id, addedAt} - times out after PENDING_CHILD_TIMEOUT
@@ -60,6 +59,9 @@ classdef WSN_Gateway < WSN_Node
         % Q_local: Local queue (own data: CH_HELLO, SENSOR_AGG)
         Q_fwd = {}                          % Cell array of messages to forward
         Q_local = {}                        % Cell array of locally generated messages
+        
+        % -------- PANIC DEDUPLICATION --------
+        seenPanicUIDs = []                  % Array of seen PANIC UIDs for deduplication
         
         % -------- SENSOR DATA AGGREGATION (for direct SN->GWN) --------
         sensorTable = struct('id',{}, 'lastTime',{}, 'value',{}, 'rssi',{}, 'battery',{});
@@ -100,7 +102,7 @@ classdef WSN_Gateway < WSN_Node
                 'id',{}, ...
                 'lastSeen',{}, ...
                 'rssi',{}, ...
-                'trust',{}, ...
+                'TrustScore',{}, ...
                 'commRange',{}, ...
                 'status',{}, ...
                 'tier',{}, ...
@@ -169,7 +171,7 @@ classdef WSN_Gateway < WSN_Node
     % =========================================================
     methods
         function msgs = step(obj, t, physAdj, allNodes)
-            %#ok<INUSD>
+            %
             msgs = WSN_Message.empty;
 
             % ---- ACCESS RADIO LOCK TIMEOUT (CH handshake) ----

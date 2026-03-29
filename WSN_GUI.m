@@ -39,6 +39,10 @@ classdef WSN_GUI < handle
             obj.topology.drawPackets(visualLines, t);
         end
         
+        function drawAttackVisuals(obj, nodes, t)
+            obj.topology.drawAttackVisuals(nodes, t);
+        end
+        
         function updateInspector(obj, nodes, t)
             obj.controlDeck.update(nodes, t);
             % Force topology to refresh circles if static

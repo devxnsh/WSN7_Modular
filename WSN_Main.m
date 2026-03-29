@@ -1,10 +1,14 @@
 % Type 1,5,6,7,8,9 work perfectly.
 % Observe Data Flow and Token Passing.
+%#ok<*NASGU>   % Suppress "value assigned might be unused" - defensive initializations
+%#ok<*FXSET>   % Suppress "nested function loop index" warnings - inherent to MATLAB script structure
 function WSN_Main(varargin)
-% Parse arguments: WSN_Main(headlessSteps, printInterval)
+% Parse arguments: WSN_Main(headlessSteps, printInterval, nodes)
 % Default: WSN_Main() = GUI from t=0
 % WSN_Main(100) = headless for 100 steps, print every 1 step
 % WSN_Main(100, 5) = headless for 100 steps, print at t=5,10,15...
+% WSN_Main(100, 1, nodes) = headless with pre-created nodes (for WSN_Attack.run)
+preCreatedNodes = [];
 if isempty(varargin)
     startGUIAt = 0;
     printInterval = 1;
@@ -15,10 +19,13 @@ else
     else
         printInterval = 1;
     end
+    if numel(varargin) >= 3
+        preCreatedNodes = varargin{3};
+    end
 end
 
 % Headless mode flag for optimized logging
-isHeadless = startGUIAt > 0;
+isHeadless = startGUIAt > 0; %#ok<NASGU> % Used by nested functions
 
 % Autolog settings: export every 250 timeframes
 AUTOLOG_INTERVAL = 250;
@@ -32,8 +39,23 @@ end
 % 1. INITIALIZATION
 close all; rng('shuffle');
 clc;
-% Generate Topology
-nodes = WSN_TopologyGenerator.generateTopology(WSN_Config.NodeCount, WSN_Config.FieldSize);
+% Generate Topology (or use pre-created nodes from WSN_Attack.run)
+if ~isempty(preCreatedNodes)
+    nodes = preCreatedNodes;
+    fprintf('[MAIN] Using pre-created topology (%d nodes)\n', numel(nodes));
+else
+    nodes = WSN_TopologyGenerator.generateTopology(WSN_Config.NodeCount, WSN_Config.FieldSize);
+end
+
+% === ATTACK SYSTEM INITIALIZATION ===
+% Only init if not already configured (allows WSN_Attack.run to pre-configure)
+existingData = WSN_Attack.getData();
+if isempty(existingData) || ~isfield(existingData, 'isMalicious') || numel(existingData.isMalicious) ~= numel(nodes)
+    WSN_Attack.init(numel(nodes));
+    fprintf('[ATTACK] Attack system initialized for %d nodes\n', numel(nodes));
+else
+    fprintf('[ATTACK] Using pre-configured attacks (%d malicious nodes)\n', sum(existingData.isMalicious));
+end
 
 % Initialize GUI
 gui = WSN_GUI(nodes, WSN_Config.FieldSize);
@@ -46,10 +68,10 @@ queue = {};
 visualLines = [];
 
 % Initial Physical Connectivity Calculation (Get both Phys and Stable matrices)
-[physAdj, stblAdj, distMat] = WSN_Physics.updateConnectivity(nodes);
+[physAdj, stblAdj, distMat] = WSN_Physics.updateConnectivity(nodes); % % Available for debugging
 % --- ID TRANSLATION HELPERS ---
 id2idx = @(hid) find(arrayfun(@(n) hex2dec(n.hexID) == hid, nodes), 1);
-idx2id = @(idx) hex2dec(nodes(idx).hexID);
+idx2id = @(idx) hex2dec(nodes(idx).hexID); % % Helper function
 
 % 2. SIMULATION LOOP
 try
@@ -134,6 +156,28 @@ try
 
         end
 
+        % --- C2. SYBIL HELLO INJECTION ---
+        % Inject fake HELLO messages from Sybil nodes' fake identities
+        for i = 1:numel(nodes)
+            if WSN_Attack.isMaliciousNode(i, t) && ...
+               WSN_Attack.getAttackType(i) == WSN_Attack.ATTACK_SYBIL
+                sybilMsgs = WSN_Attack.getSybilHelloMessages(i, t, nodes(i).pos, WSN_Config.HelloRange);
+                for j = 1:numel(sybilMsgs)
+                    sm = sybilMsgs{j};
+                    % Broadcast fake HELLO to all nodes in range of the fake position
+                    for dstIdx = 1:numel(nodes)
+                        if dstIdx == i, continue; end  % Don't send to self
+                        dist = norm(nodes(dstIdx).pos - sm.pos);
+                        if dist <= sm.range
+                            % Calculate fake RSSI based on fake position
+                            fakeRSSI = max(0.1, 1.0 - dist / sm.range);
+                            nodes(dstIdx).radio.pushRX(sm.msg, fakeRSSI);
+                        end
+                    end
+                end
+            end
+        end
+
         % --- D. MESSAGE DELIVERY (Processing) ---
         currentBatch = [queue, newMsgs];
         queue = {}; % Clear for next frame
@@ -173,7 +217,7 @@ try
                     if di == srcIdx, continue; end
                     if isprop(nodes(di), 'multicastGroups') && ismember(m.dst, nodes(di).multicastGroups)
                         if physAdj(srcIdx, di)
-                            destinations(end+1) = di; %#ok<AGROW>
+                            destinations(end+1) = di; %
                         end
                     end
                 end
@@ -202,7 +246,7 @@ try
                     if ~isempty(di)
                         % Physics determines reachability
                         if physAdj(srcIdx, di)
-                            destinations(end+1) = di; %#ok<AGROW>
+                            destinations(end+1) = di; %
                         end
                     end
                 end
@@ -212,6 +256,24 @@ try
             % If no destinations in range, message dies
             if isempty(destinations)
                 continue;
+            end
+            
+            % === WORMHOLE ATTACK PROCESSING ===
+            % Check if sender is a wormhole endpoint - relay to other endpoint
+            if WSN_Attack.isMaliciousNode(srcIdx, t) && ...
+               WSN_Attack.getAttackType(srcIdx) == WSN_Attack.ATTACK_WORMHOLE
+                [shouldRelay, otherEndpoint] = WSN_Attack.shouldWormholeRelay(srcIdx, t);
+                if shouldRelay && ~isempty(otherEndpoint)
+                    % Relay message to wormhole partner (out-of-band, lossless)
+                    wormholeRSSI = WSN_Attack.getWormholeRSSI(srcIdx);
+                    if otherEndpoint <= numel(nodes)
+                        nodes(otherEndpoint).radio.pushRX(m, wormholeRSSI);
+                        % Log wormhole relay
+                        if isprop(nodes(srcIdx), 'addLog')
+                            nodes(srcIdx).addLog(sprintf('t=%d [WORMHOLE_RELAY] -> endpoint %d', t, otherEndpoint));
+                        end
+                    end
+                end
             end
 
             % 2. Attempt Delivery
@@ -293,21 +355,29 @@ try
 
 
                     % VISUALIZATION
-                    % srcIdx = id2idx(m.src);
-                    % if isempty(srcIdx), continue; end
-                    [col, lw, ls] = classifyPacket(m);
+                    [col, lw, ls] = classifyPacket(m, nodes, srcIdx, t);
                     
-                    % Skip visualization for Hello messages (Type 0)
+                    % Skip visualization for Hello messages (Type 0) from NORMAL nodes
+                    % But DO draw them if they're from malicious nodes (stark colors)
                     if m.type == WSN_Config.MSG_TYPE_HELLO
-                        % No visual line for Hello packets
-                        continue;
-                    end
-                    
-                    % TOKEN packets expire immediately (flash effect)
-                    % Type 1 sensor packets also expire after 1 TF
-                    if m.type == WSN_Config.MSG_TYPE_TOKEN || m.type == WSN_Config.MSG_TYPE_SENSOR
+                        if ~WSN_Attack.isMaliciousNode(srcIdx, t)
+                            % Normal Hello: skip visualization
+                            continue;
+                        end
+                        % Malicious Hello: draw with stark color (short lifetime)
+                        lifetime = 1;
+                    elseif m.type == WSN_Config.MSG_TYPE_HB
+                        % Heartbeat: skip if normal, draw if malicious
+                        if ~WSN_Attack.isMaliciousNode(srcIdx, t)
+                            continue;
+                        end
+                        % Malicious Heartbeat: draw with stark color
+                        lifetime = 1;
+                    elseif m.type == WSN_Config.MSG_TYPE_TOKEN || m.type == WSN_Config.MSG_TYPE_SENSOR
+                        % TOKEN and SENSOR packets expire immediately (flash effect)
                         lifetime = 1;
                     else
+                        % All other messages: longer lifetime
                         lifetime = 5;
                     end
 
@@ -383,8 +453,18 @@ try
 
             gui.updateNetwork(nodes, physAdj, t);
             gui.drawPackets(visualLines, t);
+            gui.drawAttackVisuals(nodes, t);  % Ghost links, Sybil nodes, DoS lines
             drawnow limitrate;
         end
+    end
+    
+    % === ATTACK LOG EXPORT (end of simulation) ===
+    attackSummary = WSN_Attack.getAttackSummary();
+    if attackSummary.numMalicious > 0
+        attackLogFile = sprintf('logs/attack_log_%s.csv', datestr(now, 'yyyymmdd_HHMMSS'));
+        WSN_Attack.exportGroundTruth(attackLogFile);
+        fprintf('[ATTACK] Summary: %d malicious nodes, %d ground truth entries\n', ...
+            attackSummary.numMalicious, attackSummary.groundTruthEntries);
     end
 
 catch ME
@@ -395,14 +475,37 @@ catch ME
     end
     errordlg(sprintf('Simulation Crashed at t=%d\n%s', t, ME.message), 'WSN Error');
 end
-    function [col, lw, ls] = classifyPacket(m)
+    function [col, lw, ls] = classifyPacket(m, nodes, srcIdx, t)
+        % Classify packet color, line width, style
+        % Uses attack colors for malicious node traffic
+        
+        % ---------- MALICIOUS SOURCE CHECK ----------
+        % If source is malicious, use attack-specific colors
+        isMalicious = false;
+        if nargin >= 4 && ~isempty(srcIdx) && srcIdx > 0 && srcIdx <= numel(nodes)
+            isMalicious = WSN_Attack.isMaliciousNode(srcIdx, t);
+        end
+        
+        if isMalicious
+            % Use attack colors for all messages from malicious nodes
+            attackColor = WSN_Attack.getMessageColor(srcIdx);
+            if ~isempty(attackColor)
+                col = attackColor;
+                lw  = 2.5;  % Emphasize attack traffic
+                ls  = '-';
+                return;
+            end
+        end
+        
         % ---------- DEFAULT ----------
         col = [1 0.4 0.7];   % pink
         lw  = 0.5;
         ls  = '-';
 
         % ---------- HELLO MESSAGES (Type 0) ----------
-        % DISABLED: Skip visualization for Hello packets to speed up sim
+        % Normally skipped, but if explicitly called with a hello from malicious source,
+        % the attack color override above will have already returned.
+        % This branch is only reached for normal nodes.
         if m.type == WSN_Config.MSG_TYPE_HELLO
             col = [0 0 0];       % won't be used
             lw  = 0;
@@ -426,6 +529,14 @@ end
             col = [0.3 0.5 1.0];  % Blue
             lw  = 0.5;            % Thin line
             ls  = '-';
+            return;
+        end
+        
+        % ---------- TYPE 2: PANIC MESSAGES ----------
+        if m.type == WSN_Config.MSG_TYPE_PANIC
+            col = [1.0 0.2 0.2];  % Bright red
+            lw  = 3.0;            % Thick to stand out
+            ls  = '-';            % Solid line
             return;
         end
         

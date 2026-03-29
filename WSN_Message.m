@@ -114,58 +114,66 @@ classdef WSN_Message < handle
         function applyLayeredEncryption(obj, originalSender, globalKey, localKey)
             % Apply layered encryption as specified:
             % 1. Unencrypted: immediate sender, receiver, message type (already set)
-            % 2. Globally encrypted: original sender
+            % 2. Globally encrypted: original sender (prepended to payload)
             % 3. Double encrypted: payload data
+            %
+            % Final payload format: [originalSrc(2 bytes), encryptedPayload...]
+            % This matches deserialize() which extracts originalSrc from first 2 bytes
 
             if nargin < 2, originalSender = obj.src; end
             if nargin < 3, globalKey = obj.GLOBAL_AES_KEY_HEX; end
 
             obj.originalSrc = uint16(originalSender);
-
-            % Step 1: Encrypt original sender with global key
             originalSrcBytes = typecast(obj.originalSrc, 'uint8');
-            obj.globalEncryptedPayload = WSN_Crypto.encrypt(originalSrcBytes, globalKey);
-            obj.setGlobalEncrypted(true);
 
-            % Step 2: If local key provided, double encrypt the payload
+            % Step 1: Encrypt the payload
             if nargin >= 4 && ~isempty(localKey) && ~isempty(obj.payload)
-                % First encrypt payload with local key
+                % Double encrypt: local key first, then global key
                 localEncrypted = WSN_Crypto.encrypt(obj.payload, localKey);
-                % Then encrypt again with global key
-                obj.doubleEncryptedPayload = WSN_Crypto.encrypt(localEncrypted, globalKey);
+                encryptedPayload = WSN_Crypto.encrypt(localEncrypted, globalKey);
                 obj.setDoubleEncrypted(true);
             elseif ~isempty(obj.payload)
                 % Single encryption with global key
-                obj.doubleEncryptedPayload = WSN_Crypto.encrypt(obj.payload, globalKey);
+                encryptedPayload = WSN_Crypto.encrypt(obj.payload, globalKey);
                 obj.setDoubleEncrypted(true);
+            else
+                encryptedPayload = uint8([]);
             end
+
+            % Step 2: Prepend originalSrc (unencrypted) to encrypted payload
+            % This format matches deserialize() expectations
+            obj.doubleEncryptedPayload = [originalSrcBytes(:)', encryptedPayload(:)'];
+            obj.globalEncryptedPayload = originalSrcBytes;  % Keep for compatibility
+            obj.setGlobalEncrypted(true);
         end
 
         function [decryptedPayload, originalSender] = decryptLayered(obj, globalKey, localKey)
             % Decrypt layered encryption
-            originalSender = obj.src; % Default to immediate sender
+            % Format: first 2 bytes of payload = originalSrc (unencrypted)
+            %         remaining bytes = encrypted payload data
+            % NOTE: doubleEncryptedPayload now includes originalSrc for checksum
+            %       so we must skip first 2 bytes when decrypting
+            originalSender = obj.originalSrc; % Original sender (already extracted in deserialize)
+            if originalSender == 0
+                originalSender = obj.src; % Fallback to immediate sender
+            end
             decryptedPayload = obj.payload; % Default to current payload
 
             try
                 if obj.isDoubleEncrypted() && ~isempty(obj.doubleEncryptedPayload)
+                    % Skip first 2 bytes (originalSrc) then decrypt
+                    encryptedPart = obj.doubleEncryptedPayload(3:end);
                     % Double decryption: global key first, then local key
-                    globalDecrypted = WSN_Crypto.decrypt(obj.doubleEncryptedPayload, globalKey);
+                    globalDecrypted = WSN_Crypto.decrypt(encryptedPart, globalKey);
                     if nargin >= 3 && ~isempty(localKey)
                         decryptedPayload = WSN_Crypto.decrypt(globalDecrypted, localKey);
                     else
                         decryptedPayload = globalDecrypted;
                     end
                 elseif obj.isGlobalEncrypted() && ~isempty(obj.globalEncryptedPayload)
-                    % Single global decryption
-                    decryptedPayload = WSN_Crypto.decrypt(obj.globalEncryptedPayload, globalKey);
-                end
-
-                % Extract original sender if available
-                if obj.isGlobalEncrypted() && ~isempty(obj.globalEncryptedPayload)
-                    originalSrcBytes = WSN_Crypto.decrypt(typecast(obj.originalSrc, 'uint8'), globalKey);
-                    if numel(originalSrcBytes) >= 2
-                        originalSender = typecast(originalSrcBytes(1:2), 'uint16');
-                    end
+                    % Skip first 2 bytes (originalSrc) then decrypt
+                    encryptedPart = obj.globalEncryptedPayload(3:end);
+                    decryptedPayload = WSN_Crypto.decrypt(encryptedPart, globalKey);
                 end
             catch
                 % Decryption failed, return original data
@@ -244,10 +252,10 @@ classdef WSN_Message < handle
             bytes = [bytes; typecast(obj.src,'uint8').'];        % Immediate sender (unencrypted)
             bytes = [bytes; typecast(obj.dst,'uint8').'];        % Immediate receiver (unencrypted)
 
-            % Globally encrypted original sender
-            if obj.isGlobalEncrypted()
-                bytes = [bytes; typecast(obj.originalSrc,'uint8').'];
-            end
+            % NOTE: originalSrc is NOT added separately here.
+            % For encrypted messages, originalSrc is prepended to the payload
+            % during applyLayeredEncryption, so it's included in doubleEncryptedPayload.
+            % This matches deserialize() which extracts originalSrc from payload bytes.
 
             % Payload data (double encrypted if flag set)
             if obj.isDoubleEncrypted() && ~isempty(obj.doubleEncryptedPayload)
@@ -320,11 +328,18 @@ classdef WSN_Message < handle
                 msg.checksum = bytes(pEnd+5);
 
                 % Handle layered encryption parsing
+                % Format: first 2 bytes = originalSrc, rest = encryptedPayload
+                % IMPORTANT: Keep full payload in doubleEncryptedPayload for checksum
+                % The decryptLayered() function will skip originalSrc bytes
                 if msg.isGlobalEncrypted() && msg.payloadLen >= 2
-                    % First 2 bytes of payload are original sender
+                    % First 2 bytes of payload are original sender (unencrypted)
                     msg.originalSrc = typecast(msg.payload(1:2), 'uint16');
-                    % Remaining payload is global encrypted data
-                    msg.globalEncryptedPayload = msg.payload(3:end);
+                    % Keep FULL payload for checksum verification
+                    if msg.isDoubleEncrypted()
+                        msg.doubleEncryptedPayload = msg.payload;  % Full payload
+                    else
+                        msg.globalEncryptedPayload = msg.payload;  % Full payload
+                    end
                 elseif msg.isDoubleEncrypted()
                     msg.doubleEncryptedPayload = msg.payload;
                 end
@@ -444,17 +459,17 @@ classdef WSN_Message < handle
             
             % Append GWN children (first degree)
             for i = 1:numel(gwChildren)
-                p = [p, typecast(uint16(gwChildren(i)),'uint8')]; %#ok<AGROW>
+                p = [p, typecast(uint16(gwChildren(i)),'uint8')]; %
             end
             
             % Append CH children (first degree)
             for i = 1:numel(chChildren)
-                p = [p, typecast(uint16(chChildren(i)),'uint8')]; %#ok<AGROW>
+                p = [p, typecast(uint16(chChildren(i)),'uint8')]; %
             end
             
             % Append secondary children (second degree)
             for i = 1:numel(secondaryChildren)
-                p = [p, typecast(uint16(secondaryChildren(i)),'uint8')]; %#ok<AGROW>
+                p = [p, typecast(uint16(secondaryChildren(i)),'uint8')]; %
             end
 
             obj.payload = p;

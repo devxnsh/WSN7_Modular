@@ -1,3 +1,4 @@
+%    % Suppress property shadowing suggestions - intentional local alias pattern
 classdef WSN_Gateway_Messaging < handle
     % =========================================================
     % WSN GATEWAY MESSAGING — RX/TX + PROTOCOL SEMANTICS
@@ -169,6 +170,35 @@ classdef WSN_Gateway_Messaging < handle
             actions = {};
             gw = obj.gw;
             
+            % === ATTACK: BLACKHOLE/GRAYHOLE CHECK ===
+            % Malicious GWN may drop messages instead of forwarding
+            if WSN_Attack.isMaliciousNode(gw.id)
+                attackType = WSN_Attack.getAttackType(gw.id);
+                if attackType == WSN_Attack.ATTACK_BLACKHOLE
+                    if WSN_Attack.shouldDropBlackhole(gw.id, t)
+                        % Add ghost link to parent (dropped message)
+                        if ~isempty(gw.parent)
+                            WSN_Attack.addGhostLink(gw.id, gw.parent, t + 3, 'FWD');
+                        end
+                        % Log RX only - no forward/TX logged (stealth)
+                        gw.addLog(sprintf('t=%d [RX] type=%d.%d <- %s (no action)', ...
+                            t, msg.type, msg.subtype, gw.fmtID(msg.src)));
+                        return;  % Drop message
+                    end
+                elseif attackType == WSN_Attack.ATTACK_GRAYHOLE
+                    if WSN_Attack.shouldDropGrayhole(gw.id, t)
+                        % Add ghost link to parent (dropped message)
+                        if ~isempty(gw.parent)
+                            WSN_Attack.addGhostLink(gw.id, gw.parent, t + 3, 'FWD');
+                        end
+                        % Log RX only - no forward/TX logged (stealth)
+                        gw.addLog(sprintf('t=%d [RX] type=%d.%d <- %s (no action)', ...
+                            t, msg.type, msg.subtype, gw.fmtID(msg.src)));
+                        return;  % Drop message selectively
+                    end
+                end
+            end
+            
             % =========================================================
             % UNIVERSAL BACKBONE RELAY: Encrypted + From Child → Queue to Q_fwd
             % This handles ENC_HELLO, CH_HELLO (5.0/5.1), SENSOR_AGG (5.2), etc.
@@ -212,6 +242,17 @@ classdef WSN_Gateway_Messaging < handle
                 gw.addLogAccess(sprintf('t=%d [RX] SENSOR <- %s', ...
                     t, gw.fmtID(msg.src)), msg, t);
                 obj.handleSensorData(msg, t, rssi);
+                return;
+            end
+            
+            % Handle PANIC (Type 2) - Emergency messages with TTL rebroadcast
+            if msg.type == WSN_Config.MSG_TYPE_PANIC
+                if ~msg.verifyChecksum()
+                    return;
+                end
+                gw.addLog(sprintf('t=%d [PANIC_RX] sev=%d from=%s TTL=%d', ...
+                    t, msg.prio, gw.fmtID(msg.src), msg.ttl));
+                actions = obj.handlePanicMessage(msg, t, rssi);
                 return;
             end
             
@@ -333,7 +374,7 @@ classdef WSN_Gateway_Messaging < handle
                 % New neighbor from Hello
                 gw.neighborTable(end+1) = struct( ...
                     'id', sender, 'lastSeen', t, 'rssi', rssi, ...
-                    'trust', trust(min(end, min(3, tier)+1)), ...
+                    'TrustScore', trust(min(end, min(3, tier)+1)), ...
                     'commRange', 0, 'status', gw.ST_NONE, ...
                     'tier', tier, 'battery', battery, 'neighborCount', neighborCount, ...
                     'isVerified', senderVerified);
@@ -371,7 +412,7 @@ classdef WSN_Gateway_Messaging < handle
             if isempty(idx)
                 gw.neighborTable(end+1) = struct( ...
                     'id', sender, 'lastSeen', t, 'rssi', rssi, ...
-                    'trust', trust(min(end, msg.subtype+1)), ...
+                    'TrustScore', trust(min(end, msg.subtype+1)), ...
                     'commRange', 0, 'status', gw.ST_NONE, ...
                     'tier', 3, 'battery', 0, 'neighborCount', 0, ...
                     'isVerified', senderVerified);
@@ -632,7 +673,6 @@ classdef WSN_Gateway_Messaging < handle
             % Gather children info
             gwChildren = gw.children;           % First-degree GWN children
             chChildren = gw.chChildren;         % First-degree CH children
-            secChildren = gw.secondaryChildren; % Second-degree (CHs recruited by our CHs)
             
             % Count sensors (from sensorTable)
             snCount = numel(gw.sensorTable);
@@ -640,7 +680,7 @@ classdef WSN_Gateway_Messaging < handle
             msg = WSN_Message(7, hex2dec(gw.hexID), gw.parent, []);
             msg.subtype = 5;  % ENC_HELLO
             msg.setEncHelloPayload(hex2dec(gw.hexID), gw.parent, gw.localKeyHex, ...
-                numel(chChildren), snCount, gwChildren, chChildren, secChildren);
+                numel(chChildren), snCount, gwChildren, chChildren, []);
             
             % ENCRYPT payload with global key (payload contains sensitive local key!)
             msg.payload = WSN_Crypto.encrypt(msg.payload, gw.encryptionKey);
@@ -648,8 +688,8 @@ classdef WSN_Gateway_Messaging < handle
             msg.setEncrypted(true);
             msg.addChecksum();
             
-            gw.addLogBackbone(sprintf('t=%d [ENC_HELLO] TX: gwCh=%d, chCh=%d, secCh=%d, sn=%d (encrypted)', ...
-                t, numel(gwChildren), numel(chChildren), numel(secChildren), snCount), msg, t);
+            gw.addLogBackbone(sprintf('t=%d [ENC_HELLO] TX: gwCh=%d, chCh=%d, sn=%d (encrypted)', ...
+                t, numel(gwChildren), numel(chChildren), snCount), msg, t);
         end
         
         function actions = handle_ENC_HELLO(obj, msg, t)
@@ -771,6 +811,62 @@ classdef WSN_Gateway_Messaging < handle
                 if ~isempty(fwd)
                     obj.enqueueLocal(fwd, t);
                 end
+            end
+        end
+        
+        function actions = handlePanicMessage(obj, msg, t, ~)
+            % Handle incoming PANIC message (Type 2)
+            % GWN forwards PANIC to parent with decremented TTL
+            actions = {};
+            gw = obj.gw;
+            sender = msg.src;
+            if ismember(msg.uid, gw.seenPanicUIDs)
+                return;  % Already processed
+            end
+            gw.seenPanicUIDs = [gw.seenPanicUIDs, msg.uid];
+            
+            % Prune old UIDs (keep last 100)
+            if numel(gw.seenPanicUIDs) > 100
+                gw.seenPanicUIDs = gw.seenPanicUIDs(end-99:end);
+            end
+            
+            % Check TTL
+            if msg.ttl <= 0
+                gw.addLog(sprintf('t=%d [PANIC_DROP] TTL expired from %s', ...
+                    t, gw.fmtID(sender)));
+                return;
+            end
+            
+            % Extract panic info from payload
+            originalSrc = sender;
+            sensorValue = 0;
+            if msg.payloadLen >= 4
+                originalSrc = typecast(msg.payload(1:2), 'uint16');
+                sensorValue = typecast(msg.payload(3:4), 'uint16');
+            end
+            
+            gw.addLog(sprintf('t=%d [PANIC_FWD] orig=%s val=%d -> parent TTL=%d', ...
+                t, gw.fmtID(originalSrc), sensorValue, msg.ttl - 1));
+            
+            % Forward to parent with decremented TTL
+            if ~isempty(gw.parent) && ~isa(gw, 'WSN_Sink')
+                fwdMsg = WSN_Message();
+                fwdMsg.type = WSN_Config.MSG_TYPE_PANIC;
+                fwdMsg.subtype = msg.subtype;
+                fwdMsg.src = hex2dec(gw.hexID);
+                fwdMsg.dst = gw.parent;
+                fwdMsg.ttl = msg.ttl - 1;
+                fwdMsg.prio = msg.prio;
+                fwdMsg.seq = msg.seq;
+                fwdMsg.uid = msg.uid;
+                fwdMsg.payload = msg.payload;
+                fwdMsg.payloadLen = msg.payloadLen;
+                fwdMsg.addChecksum();
+                actions{end+1} = struct('type', 'RESP', 'msg', fwdMsg);
+            elseif isa(gw, 'WSN_Sink')
+                % Sink receives the PANIC - log it as received
+                gw.addLog(sprintf('t=%d [PANIC_RECEIVED] *** EMERGENCY *** orig=%s sev=%d', ...
+                    t, gw.fmtID(originalSrc), msg.prio));
             end
         end
         
@@ -993,7 +1089,7 @@ classdef WSN_Gateway_Messaging < handle
             for g = uniqueGroups
                 groupMask = (groupsThisFrag == g);
                 groupSensors = sensorsThisFrag(groupMask);
-                payload = [payload, uint8(g), uint8(numel(groupSensors))]; %#ok<AGROW>
+                payload = [payload, uint8(g), uint8(numel(groupSensors))]; %
                 
                 for i = 1:numel(groupSensors)
                     s = groupSensors(i);
@@ -1003,7 +1099,7 @@ classdef WSN_Gateway_Messaging < handle
                         typecast(uint16(s.value), 'uint8'), ...     % 2 bytes
                         uint8(round(abs(s.rssi))), ...              % 1 byte (absolute RSSI)
                         uint8(s.battery)];                          % 1 byte
-                    payload = [payload, sensorEntry]; %#ok<AGROW>
+                    payload = [payload, sensorEntry]; %
                 end
             end
             
@@ -1354,13 +1450,6 @@ classdef WSN_Gateway_Messaging < handle
                 gw.addLogAccess(sprintf('t=%d [ERROR] CH_INFO from %s - parent mismatch %s', ...
                     t, dec2hex(uint16(sender), 4), dec2hex(uint16(parentCHID), 4)), [], t);
                 return;
-            end
-            
-            % Add secondary CH to children with double brackets ((AAxx))
-            if isempty(gw.secondaryChildren)
-                gw.secondaryChildren = recruitedID;
-            else
-                gw.secondaryChildren = [gw.secondaryChildren, recruitedID];
             end
             
             gw.addLogAccess(sprintf('t=%d [SECONDARY_CH] %s recruited by %s', ...

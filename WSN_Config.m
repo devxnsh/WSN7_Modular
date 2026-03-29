@@ -7,6 +7,7 @@ classdef WSN_Config
         NodeCount = 100;
         FieldSize = [100, 100];
         CenterPos = [50, 50];
+        HelloRange = 80;         % Default radio range for HELLO messages (Sybil etc.)
 
         % --- TIERS ---
         TIER_SENSOR = 1; TIER_CH = 2; TIER_GWN = 3;
@@ -48,8 +49,9 @@ classdef WSN_Config
         
         % --- PANIC CONFIG ---
         PANIC_DEFAULT_TTL = 3;       % Default TTL for panic flood
-        PANIC_ANOMALY_THRESHOLD = 60; % % change to trigger anomaly panic
-        PANIC_BATTERY_CRIT_LEVEL = 10; % Battery % to trigger critical alert
+        PANIC_ANOMALY_THRESHOLD = 300; % % change to trigger anomaly panic (very rare - actual emergency)
+        PANIC_BATTERY_CRIT_LEVEL = 5;  % Battery % to trigger critical alert (near-death only)
+        PANIC_COOLDOWN = 500;          % Min TFs between panics from same node
         
         % --- SENSOR DATA SUBTYPES (Type 5) ---
         % 5.0 = CH_HELLO (existing)
