@@ -100,6 +100,48 @@ classdef WSN_Config
         QUEUE_LOCAL_MAX = 15;        % Max local queue (own data)
         QUEUE_PURGE_COUNT = 3;       % Purge oldest N when queue full
         
+        % --- ML-IDS CENSUS/SHUTDOWN/UPDATE PROTOCOL (ML_IDS_PLAN.md Phase 4) ---
+        MSG_TYPE_CENSUS   = 11;  % Daisy-chain trust polling
+        MSG_TYPE_SHUTDOWN = 12;  % Reset/blacklist enforcement
+        MSG_TYPE_UPDATE   = 13;  % Trust weight/threshold push from Sink
+
+        CENSUS_POLL_INITIATE = 0;   % "I distrust this node, do you?"
+        CENSUS_POLL_YES      = 1;   % "I also distrust this node"
+        CENSUS_POLL_NO       = 2;   % "This node looks fine to me"
+        CENSUS_POLL_COMPLETE = 3;   % Initiator's verdict, sent uplink to parent/Sink
+
+        SHUTDOWN_SOFT_RESET = 0;   % Clear local trust/queue state, keep operating
+        SHUTDOWN_HARD_RESET = 1;   % Force back to STATE_BOOT / re-handshake
+        SHUTDOWN_BLACKLIST  = 2;   % Permanent: stop being routed to/through
+
+        UPDATE_TRUST_DELTA   = 0;  % Sink-pushed ad-hoc trust adjustment
+        UPDATE_THRESHOLD_SET = 1;  % Sink-pushed new trust thresholds (drift correction)
+
+        % --- TRUST THRESHOLDS & DELTAS (rule-based, in-sim local tier) ---
+        TRUST_INITIAL              = 50;
+        TRUST_MAX                  = 100;
+        TRUST_MIN                  = 0;
+        TRUST_DELTA_SUCCESS        = 1;     % per successful message exchange
+        TRUST_DELTA_FAIL_HARD      = 10;     % retry exhaustion / confirmed drop pattern
+        TRUST_CENSUS_TRIGGER       = 20;    % below this, a neighbor initiates a POLL_INITIATE
+        TRUST_BLACKLIST_THRESHOLD  = 5;      % below this after malicious verdict, escalate faster
+        CENSUS_POLL_TIMEOUT        = 10;     % TFs to wait for votes before declaring inconclusive
+        CENSUS_QUORUM_YES_RATIO    = 0.6;    % fraction of responding neighbors voting YES to confirm malicious
+        CENSUS_MIN_VOTERS          = 2;      % minimum responses needed to reach a verdict
+        RESET_ESCALATION_COUNT     = 3;      % SOFT_RESETs before HARD_RESET; HARD_RESETs before BLACKLIST
+
+        % --- REPORTING-SILENCE DETECTOR (ML_IDS_PLAN.md Phase 4 follow-up) ---
+        % Neither of the two triggers above actually catches Blackhole/Grayhole:
+        % both attacks fake-ACK every child's incoming data (see
+        % WSN_ClusterHead.m handleSensorAgg's stealth-ACK branch) before
+        % silently dropping the relay upward, so the child's own ACK-retry
+        % logic never sees a failure. The only place the attack is visible
+        % is the attacker's OWN parent, who simply stops receiving periodic
+        % reports. SILENCE_GRACE_MULTIPLIER * the child's expected report
+        % period is the grace window before flagging that silence as a
+        % trust signal (wide enough to absorb normal retry/jitter delay).
+        SILENCE_GRACE_MULTIPLIER  = 3;
+
         % --- CH-GWN HANDSHAKE SUBTYPES (Type 6) ---
         CH_SUB_REQ = 0;      % 6.0 CH_REQ: CH→GWN join request
         CH_SUB_ACK = 1;      % 6.1 CH_ACK: GWN→CH with local key
@@ -174,6 +216,9 @@ classdef WSN_Config
         CH_CH_RSSI_Threshold = 0.5;          % CH joining CH: orphan case
         
         
+        % --- ML-IDS FEATURE EXPORT (ML_IDS_PLAN.md Phase 1-2) ---
+        FEATURE_WINDOW_LEN = 50;     % Ticks per feature-export window (divides AUTOLOG_INTERVAL=250)
+
         % --- ADAPTIVE LOGIC ---
         CrazyDuration_Neighbor = 50; CrazyDuration_Parent = 100;
         DemotionRadius = 35;

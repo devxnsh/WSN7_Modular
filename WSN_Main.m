@@ -3,12 +3,19 @@
 %#ok<*NASGU>   % Suppress "value assigned might be unused" - defensive initializations
 %#ok<*FXSET>   % Suppress "nested function loop index" warnings - inherent to MATLAB script structure
 function WSN_Main(varargin)
-% Parse arguments: WSN_Main(headlessSteps, printInterval, nodes)
-% Default: WSN_Main() = GUI from t=0
-% WSN_Main(100) = headless for 100 steps, print every 1 step
-% WSN_Main(100, 5) = headless for 100 steps, print at t=5,10,15...
+% Parse arguments: WSN_Main(startGUIAt, printInterval, nodes, simSteps)
+% Default: WSN_Main() = GUI visible from t=0, runs to WSN_Config.SimSteps
+% WSN_Main(100) = GUI becomes visible at t=100; the simulation itself
+%                 still runs to WSN_Config.SimSteps (10000 by default) --
+%                 this argument does NOT stop the run early.
+% WSN_Main(100, 5) = same, prints status every 5 ticks before t=100
 % WSN_Main(100, 1, nodes) = headless with pre-created nodes (for WSN_Attack.run)
+% WSN_Main(1e9, 50, nodes, 500) = fully headless (GUI never shown, since
+%                 startGUIAt > simSteps), runs exactly 500 ticks then
+%                 exits and exports logs/CSVs. This is the form used by
+%                 WSN_Attack_Demo.m's batch driver (ML_IDS_PLAN.md Phase 3).
 preCreatedNodes = [];
+simSteps = WSN_Config.SimSteps;
 if isempty(varargin)
     startGUIAt = 0;
     printInterval = 1;
@@ -21,6 +28,9 @@ else
     end
     if numel(varargin) >= 3
         preCreatedNodes = varargin{3};
+    end
+    if numel(varargin) >= 4 && ~isempty(varargin{4})
+        simSteps = varargin{4};
     end
 end
 
@@ -57,6 +67,11 @@ else
     fprintf('[ATTACK] Using pre-configured attacks (%d malicious nodes)\n', sum(existingData.isMalicious));
 end
 
+% === ML-IDS FEATURE EXPORT INITIALIZATION (ML_IDS_PLAN.md Phase 1-2) ===
+WSN_FeatureExport.init(nodes);
+WSN_SinkFeatureExport.init();
+featureWindowStart = 1;
+
 % Initialize GUI
 gui = WSN_GUI(nodes, WSN_Config.FieldSize);
 if startGUIAt > 0
@@ -75,7 +90,7 @@ idx2id = @(idx) hex2dec(nodes(idx).hexID); % % Helper function
 
 % 2. SIMULATION LOOP
 try
-    for t = 1:WSN_Config.SimSteps
+    for t = 1:simSteps
         % Stop if GUI is closed
         if ~ishandle(gui.fig), break; end
 
@@ -121,6 +136,7 @@ try
         % --- B. UPDATE PHYSICS & BATTERY ---
         for i = 1:numel(nodes)
             nodes(i).updatePhysics(t);
+            WSN_FeatureExport.tapTick(i, nodes(i), t);
         end
 
         % --- C. MESSAGE GENERATION (Step) ---
@@ -135,6 +151,7 @@ try
 
             if ~isempty(generated)
                 for g = generated
+                    WSN_FeatureExport.tapTx(i, g, t);
                     hex = g.serialize();                 % HARD TX BOUNDARY
                     % Skip global event bus for Hello (Type 0) and Heartbeat (Type 9)
                     if g.type ~= WSN_Config.MSG_TYPE_HELLO && g.type ~= WSN_Config.MSG_TYPE_HB
@@ -277,6 +294,7 @@ try
             end
 
             % 2. Attempt Delivery
+            anyDelivered = false;
             for dID = destinations
                 % Safety check for invalid IDs
                 if dID < 1 || dID > numel(nodes), continue; end
@@ -343,7 +361,9 @@ try
                         % Non-GWN nodes use single radio
                         nodes(dID).radio.pushRX(m, rssi);
                     end
-                    
+                    WSN_FeatureExport.tapRx(dID, rssi, m, t);
+                    anyDelivered = true;
+
                     % ---- GLOBAL EVENT FEED (RX) ----
                     % COMMENTED OUT: Each receiving node emits, causing duplicates
                     % May be useful when propagation delay is introduced
@@ -392,6 +412,9 @@ try
                     visualLines = [visualLines, vl];
                 end
             end
+            if anyDelivered
+                WSN_FeatureExport.tapTxSuccess(srcIdx);
+            end
         end
         % --- D2. RADIO STEP & PROTOCOL DELIVERY ---
         for i = 1:numel(nodes)
@@ -400,6 +423,7 @@ try
             [txOut, rxMsg, rxRSSI] = nodes(i).radio.step(t);
 
             if ~isempty(txOut)
+                WSN_FeatureExport.tapTx(i, txOut{1}, t);
                 queue{end+1} = txOut{1}.serialize();
                 % Skip global event bus for Hello (Type 0) and Heartbeat (Type 9)
                 if txOut{1}.type ~= WSN_Config.MSG_TYPE_HELLO && txOut{1}.type ~= WSN_Config.MSG_TYPE_HB
@@ -425,6 +449,7 @@ try
                 [txOut_acc, rxMsg_acc, rxRSSI_acc] = nodes(i).radioAccess.step(t);
 
                 if ~isempty(txOut_acc)
+                    WSN_FeatureExport.tapTx(i, txOut_acc{1}, t);
                     queue{end+1} = txOut_acc{1}.serialize();
                     % Skip global event bus for Hello (Type 0) and Heartbeat (Type 9)
                     if txOut_acc{1}.type ~= WSN_Config.MSG_TYPE_HELLO && txOut_acc{1}.type ~= WSN_Config.MSG_TYPE_HB
@@ -443,6 +468,16 @@ try
                     end
                 end
             end
+        end
+
+        % --- ML-IDS FEATURE WINDOW FLUSH (every FEATURE_WINDOW_LEN ticks) ---
+        if mod(t, WSN_Config.FEATURE_WINDOW_LEN) == 0
+            WSN_FeatureExport.flushWindow(nodes, t);
+            sinkIdxForFeatures = find(arrayfun(@(n) isa(n, 'WSN_Sink'), nodes), 1);
+            if ~isempty(sinkIdxForFeatures)
+                WSN_SinkFeatureExport.flushWindow(nodes(sinkIdxForFeatures), id2idx, t, featureWindowStart);
+            end
+            featureWindowStart = t + 1;
         end
 
         % --- E. RENDER UPDATE (Only when GUI visible) ---
@@ -466,6 +501,11 @@ try
         fprintf('[ATTACK] Summary: %d malicious nodes, %d ground truth entries\n', ...
             attackSummary.numMalicious, attackSummary.groundTruthEntries);
     end
+
+    % === ML-IDS FEATURE DATASET EXPORT (end of simulation, ML_IDS_PLAN.md Phase 1-2) ===
+    timestampStr = datestr(now, 'yyyymmdd_HHMMSS');
+    WSN_FeatureExport.exportCSV(sprintf('logs/local_features_%s.csv', timestampStr));
+    WSN_SinkFeatureExport.exportCSV(sprintf('logs/sink_features_%s.csv', timestampStr));
 
 catch ME
     % --- ERROR TRAPPING ---

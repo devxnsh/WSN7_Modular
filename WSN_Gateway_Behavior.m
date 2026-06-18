@@ -360,12 +360,19 @@ classdef WSN_Gateway_Behavior < handle
                         
                         % Increment retry count
                         obj.retryCount = obj.retryCount + 1;
+                        WSN_FeatureExport.tapRetransmitByHex(gw.hexID);
                         if obj.retryCount >= WSN_Config.MAX_RETRIES
                             % Max retries exhausted - reject and reset currentRecruit
                             if ~isempty(timedOutPartner)
                                 idx = find([gw.neighborTable.id] == timedOutPartner, 1);
                                 if ~isempty(idx)
                                     gw.neighborTable(idx).status = gw.ST_REJECT;
+                                end
+                                % ML-IDS: target never responded -- distrust it.
+                                % Gated past SetupTime so normal network-formation
+                                % retry churn doesn't read as malicious behavior.
+                                if t > WSN_Config.SetupTime
+                                    gw.updateNeighborTrust(timedOutPartner, -WSN_Config.TRUST_DELTA_FAIL_HARD);
                                 end
                             end
                             gw.addLog(sprintf('t=%d [SINK_TIMEOUT] Exhausted %d retries for %s - REJECTED', ...
@@ -573,11 +580,18 @@ classdef WSN_Gateway_Behavior < handle
                     else
                         % CHECK MAX_RETRIES BEFORE RETRYING EXISTING TARGET
                         obj.retryCount = obj.retryCount + 1;
+                        WSN_FeatureExport.tapRetransmitByHex(gw.hexID);
                         if obj.retryCount >= WSN_Config.MAX_RETRIES
                             % Max retries exhausted - reject and pick next
                             idx = find([gw.neighborTable.id] == obj.retryTarget, 1);
                             if ~isempty(idx)
                                 gw.neighborTable(idx).status = gw.ST_REJECT;
+                            end
+                            % ML-IDS: target never responded -- distrust it.
+                            % Gated past SetupTime so normal network-formation
+                            % retry churn doesn't read as malicious behavior.
+                            if t > WSN_Config.SetupTime
+                                gw.updateNeighborTrust(obj.retryTarget, -WSN_Config.TRUST_DELTA_FAIL_HARD);
                             end
                             gw.addLog(sprintf('t=%d [RETRY_EXHAUST] %s rejected after %d attempts', ...
                                 t, dec2hex(uint16(obj.retryTarget), 4), WSN_Config.MAX_RETRIES));

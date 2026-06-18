@@ -214,6 +214,50 @@ classdef WSN_Message < handle
             obj.payloadLen = uint8(3);
         end
 
+        function [targetID, flags] = getDownPayload(obj)
+            % Read DOWN/SHUTDOWN message payload: {targetID : uint16, flags : uint8}
+            targetID = 0; flags = 0;
+            if obj.payloadLen < 3, return; end
+            targetID = bitshift(uint16(obj.payload(1)), 8) + uint16(obj.payload(2));
+            flags = double(obj.payload(3));
+        end
+
+        function setCensusPollPayload(obj, suspectID, pollUID, reasonCode)
+            % Set Census 11.0/11.1/11.2 payload: {suspectID:u16, pollUID:u16, reasonCode:u8}
+            % reasonCode only meaningful for 11.0 POLL_INITIATE; pass 0 for votes.
+            obj.payload = uint8([ ...
+                typecast(uint16(suspectID), 'uint8'), ...
+                typecast(uint16(pollUID), 'uint8'), ...
+                uint8(reasonCode)]);
+            obj.payloadLen = uint8(5);
+        end
+
+        function [suspectID, pollUID, reasonCode] = getCensusPollPayload(obj)
+            suspectID = 0; pollUID = 0; reasonCode = 0;
+            if obj.payloadLen < 5, return; end
+            suspectID = typecast(obj.payload(1:2), 'uint16');
+            pollUID = typecast(obj.payload(3:4), 'uint16');
+            reasonCode = double(obj.payload(5));
+        end
+
+        function setCensusCompletePayload(obj, suspectID, verdict, yesCount, totalVoters)
+            % Set Census 11.3 POLL_COMPLETE payload:
+            % {suspectID:u16, verdict:u8 (0=cleared,1=malicious,2=inconclusive), yesCount:u8, totalVoters:u8}
+            obj.payload = uint8([ ...
+                typecast(uint16(suspectID), 'uint8'), ...
+                uint8(verdict), uint8(yesCount), uint8(totalVoters)]);
+            obj.payloadLen = uint8(5);
+        end
+
+        function [suspectID, verdict, yesCount, totalVoters] = getCensusCompletePayload(obj)
+            suspectID = 0; verdict = 2; yesCount = 0; totalVoters = 0;
+            if obj.payloadLen < 5, return; end
+            suspectID = typecast(obj.payload(1:2), 'uint16');
+            verdict = double(obj.payload(3));
+            yesCount = double(obj.payload(4));
+            totalVoters = double(obj.payload(5));
+        end
+
         function setHelloPayload(obj, tier, battery, neighborCount)
             % Set HELLO message payload: {Tier (4b) | Battery (4b) | NeighborCount (8b)}
             % tier: 1=Sensor, 2=CH, 3=GWN

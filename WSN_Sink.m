@@ -220,6 +220,7 @@ classdef WSN_Sink < WSN_Gateway
     methods
         function response = receive(obj, msg, t, rssi)
             response = [];
+            if obj.isBlacklisted, return; end
             obj.battery = max(0, obj.battery - WSN_Config.RxCost);
 
             if ~msg.verifyChecksum()
@@ -234,6 +235,14 @@ classdef WSN_Sink < WSN_Gateway
 
             % Route heartbeats to gateway handler
             if msg.type == 9
+                response = receive@WSN_Gateway(obj, msg, t, rssi);
+                return;
+            end
+
+            % ML-IDS CENSUS (Type 11) / SHUTDOWN (Type 12): route to gateway handler
+            % (ML_IDS_PLAN.md Phase 4) -- Sink is the terminal adjudicator for any
+            % POLL_COMPLETE whose suspect isn't a direct child of an intermediate node
+            if msg.type == WSN_Config.MSG_TYPE_CENSUS || msg.type == WSN_Config.MSG_TYPE_SHUTDOWN
                 response = receive@WSN_Gateway(obj, msg, t, rssi);
                 return;
             end

@@ -178,7 +178,15 @@ classdef WSN_GUI_SinkAnalytics < handle
                     if isfield(s, 'TrustScore') && ~isempty(s.TrustScore)
                         trustScore = s.TrustScore;
                     end
-                    
+                    % ML_IDS_PLAN.md Phase 4: flag blacklisted nodes instead of a raw score
+                    if isprop(sinkNode, 'globalTrustRegistry') && ~isempty(sinkNode.globalTrustRegistry) ...
+                            && isfield(sinkNode.globalTrustRegistry, 'isBlacklisted')
+                        gIdx = find([sinkNode.globalTrustRegistry.id] == s.id, 1);
+                        if ~isempty(gIdx) && sinkNode.globalTrustRegistry(gIdx).isBlacklisted
+                            trustScore = 'BLACKLISTED';
+                        end
+                    end
+
                     if ~isempty(s.timeseries) && isstruct(s.timeseries)
                         latest = s.timeseries(end);
                         routeHist = '-';

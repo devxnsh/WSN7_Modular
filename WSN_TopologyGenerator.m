@@ -105,8 +105,20 @@ classdef WSN_TopologyGenerator
             ctr = WSN_Config.CenterPos;
 
             % ---------- FINAL TARGET COUNTS ----------
-            targetGWNs = round(N * (0.12 + 0.03*rand()));   % 12–15%
-            targetCHs  = round(N * (0.06 + 0.04*rand()));   % 6–10% (+10% more CHs)
+            % CHs must outnumber GWNs (ML_IDS_PLAN.md Phase 4 finding: the
+            % previous 12-15% GWN / 6-10% CH split left most GWNs with 0-1
+            % CH children, structurally starving daisy-chain Census quorum
+            % at the GWN tier regardless of RF range -- there simply weren't
+            % enough CH siblings to vote). GWN density is kept close to the
+            % original (10-13%, vs. 12-15% before) -- cutting it too hard
+            % (tried 6-9% first) spreads the remaining GWNs thinner across
+            % the same field, pushing average GWN-CH distance toward the
+            % ~24-27 unit fade-affected range ceiling and tanking
+            % connectivity. Only CH density is raised (16-20%, vs. 6-10%
+            % before) so CHs reliably outnumber GWNs without sacrificing
+            % GWN spatial coverage.
+            targetGWNs = round(N * (0.10 + 0.03*rand()));   % 10–13%
+            targetCHs  = round(N * (0.16 + 0.04*rand()));   % 16–20%
             numSensors = N;
 
             % ---------- THROW EXTRA GWNs (BUFFERED) ----------

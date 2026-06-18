@@ -21,6 +21,10 @@ classdef WSN_Sensor < WSN_Node
         
         % --- TRUST STUB (Placeholder for future trust model) ---
         neighborTrust = struct('id',{}, 'score',{})  % Trust scores per neighbor
+
+        % --- ML-IDS CENSUS PROTOCOL (ML_IDS_PLAN.md Phase 4) ---
+        censusActivePolls = struct('pollUID',{}, 'suspectID',{}, 'startTick',{}, 'yesCount',{}, 'totalVoters',{}, 'voterIDs',{})
+        censusSeenPolls = []   % pollUIDs already voted on (dedup)
     end
     
     methods
@@ -64,7 +68,12 @@ classdef WSN_Sensor < WSN_Node
         
         function msgs = step(obj, t, ~, ~)
             msgs = [];
-            
+            if obj.isBlacklisted, return; end
+
+            % --- ML-IDS CENSUS: trigger polls / finalize timed-out polls ---
+            censusMsgs = obj.checkCensusTriggers(t);
+            if ~isempty(censusMsgs), msgs = [msgs, censusMsgs]; end
+
             % === ATTACK: FLOODING (Hello Flood) ===
             % Malicious sensor broadcasts excessive HELLO messages with inflated TX power
             if WSN_Attack.isMaliciousNode(obj.id) && ...
@@ -344,7 +353,8 @@ classdef WSN_Sensor < WSN_Node
         
         function response = receive(obj, msg, t, rssi)
             response = [];
-            
+            if obj.isBlacklisted, return; end
+
             % Only process if awake and in RX mode
             if ~obj.isAwake || strcmp(obj.radioState, 'SLEEP')
                 return;
@@ -382,7 +392,19 @@ classdef WSN_Sensor < WSN_Node
                 obj.handleHelloReception(msg, t, rssi);
                 return;
             end
-            
+
+            % --- ML-IDS CENSUS (Type 11) ---
+            if msg.type == WSN_Config.MSG_TYPE_CENSUS && msg.verifyChecksum()
+                response = obj.handleCensusMessage(msg, t);
+                return;
+            end
+
+            % --- ML-IDS SHUTDOWN (Type 12) ---
+            if msg.type == WSN_Config.MSG_TYPE_SHUTDOWN && isForMe && msg.verifyChecksum()
+                obj.handleShutdownMessage(msg, t);
+                return;
+            end
+
             % --- PANIC MESSAGE (Type 2) ---
             if msg.type == WSN_Config.MSG_TYPE_PANIC && msg.verifyChecksum()
                 response = obj.handlePanicReception(msg, t, rssi);
@@ -520,19 +542,145 @@ classdef WSN_Sensor < WSN_Node
         end
         
         function updateNeighborTrust(obj, neighborID, delta)
-            % STUB: Update trust score for neighbor
+            % Update trust score for neighbor (rule-based, no ML).
             % delta > 0: increase trust (good behavior)
             % delta < 0: decrease trust (suspicious behavior)
-            
+
             idx = find([obj.neighborTrust.id] == neighborID, 1);
             if isempty(idx)
-                obj.neighborTrust(end+1) = struct('id', neighborID, 'score', 50 + delta);
+                obj.neighborTrust(end+1) = struct('id', neighborID, 'score', WSN_Config.TRUST_INITIAL + delta);
             else
-                newScore = max(0, min(100, obj.neighborTrust(idx).score + delta));
+                newScore = max(WSN_Config.TRUST_MIN, min(WSN_Config.TRUST_MAX, obj.neighborTrust(idx).score + delta));
                 obj.neighborTrust(idx).score = newScore;
             end
         end
-        
+
+        % =====================================================
+        % ML-IDS CENSUS / SHUTDOWN PROTOCOL (ML_IDS_PLAN.md Phase 4)
+        % Daisy-chain trust polling + blacklist enforcement, rule-based.
+        % =====================================================
+        function msgs = checkCensusTriggers(obj, t)
+            msgs = [];
+
+            % --- Trigger new polls for any newly-distrusted neighbor ---
+            for i = 1:numel(obj.neighborTrust)
+                suspectID = obj.neighborTrust(i).id;
+                if obj.neighborTrust(i).score >= WSN_Config.TRUST_CENSUS_TRIGGER
+                    continue;
+                end
+                already = ~isempty(obj.censusActivePolls) && any([obj.censusActivePolls.suspectID] == suspectID);
+                if already, continue; end
+
+                pollUID = randi(65535);
+                pollMsg = WSN_Message(WSN_Config.MSG_TYPE_CENSUS, hex2dec(obj.hexID), hex2dec('FFFF'), []);
+                pollMsg.subtype = WSN_Config.CENSUS_POLL_INITIATE;
+                pollMsg.ttl = 1;
+                pollMsg.setCensusPollPayload(suspectID, pollUID, 1);
+                pollMsg.addChecksum();
+                msgs = [msgs, pollMsg]; %#ok<AGROW>
+
+                obj.censusActivePolls(end+1) = struct('pollUID', pollUID, 'suspectID', suspectID, ...
+                    'startTick', t, 'yesCount', 0, 'totalVoters', 0, 'voterIDs', []);
+                obj.addLog(sprintf('t=%d [CENSUS_INITIATE] suspect=%s trust=%.1f pollUID=%d', ...
+                    t, dec2hex(uint16(suspectID), 4), obj.neighborTrust(i).score, pollUID));
+            end
+
+            % --- Finalize any polls past timeout ---
+            if isempty(obj.censusActivePolls), return; end
+            ages = t - [obj.censusActivePolls.startTick];
+            doneIdx = find(ages >= WSN_Config.CENSUS_POLL_TIMEOUT);
+            for k = fliplr(doneIdx)
+                poll = obj.censusActivePolls(k);
+                if poll.totalVoters < WSN_Config.CENSUS_MIN_VOTERS
+                    verdict = 2; % inconclusive
+                elseif poll.yesCount / poll.totalVoters >= WSN_Config.CENSUS_QUORUM_YES_RATIO
+                    verdict = 1; % malicious
+                    obj.updateNeighborTrust(poll.suspectID, WSN_Config.TRUST_MIN - WSN_Config.TRUST_INITIAL);
+                else
+                    verdict = 0; % cleared
+                    idx = find([obj.neighborTrust.id] == poll.suspectID, 1);
+                    if ~isempty(idx)
+                        obj.neighborTrust(idx).score = WSN_Config.TRUST_INITIAL;
+                    end
+                end
+
+                if ~isempty(obj.parent)
+                    completeMsg = WSN_Message(WSN_Config.MSG_TYPE_CENSUS, hex2dec(obj.hexID), obj.parent, []);
+                    completeMsg.subtype = WSN_Config.CENSUS_POLL_COMPLETE;
+                    completeMsg.ttl = 5;
+                    completeMsg.setCensusCompletePayload(poll.suspectID, verdict, poll.yesCount, poll.totalVoters);
+                    completeMsg.addChecksum();
+                    msgs = [msgs, completeMsg]; %#ok<AGROW>
+                end
+
+                obj.addLog(sprintf('t=%d [CENSUS_COMPLETE] suspect=%s verdict=%d (%d/%d votes)', ...
+                    t, dec2hex(uint16(poll.suspectID), 4), verdict, poll.yesCount, poll.totalVoters));
+                obj.censusActivePolls(k) = [];
+            end
+        end
+
+        function response = handleCensusMessage(obj, msg, t)
+            response = [];
+            sender = msg.src;
+
+            if msg.subtype == WSN_Config.CENSUS_POLL_INITIATE
+                if ismember(msg.uid, obj.censusSeenPolls), return; end
+                obj.censusSeenPolls = [obj.censusSeenPolls, msg.uid];
+                if numel(obj.censusSeenPolls) > 50
+                    obj.censusSeenPolls = obj.censusSeenPolls(end-49:end);
+                end
+
+                [suspectID, pollUID, ~] = msg.getCensusPollPayload();
+                idx = find([obj.neighborTrust.id] == suspectID, 1);
+                if isempty(idx), return; end % no opinion on this suspect -> silently abstain
+
+                voteMsg = WSN_Message(WSN_Config.MSG_TYPE_CENSUS, hex2dec(obj.hexID), sender, []);
+                if obj.neighborTrust(idx).score < WSN_Config.TRUST_CENSUS_TRIGGER
+                    voteMsg.subtype = WSN_Config.CENSUS_POLL_YES;
+                else
+                    voteMsg.subtype = WSN_Config.CENSUS_POLL_NO;
+                end
+                voteMsg.ttl = 1;
+                voteMsg.setCensusPollPayload(suspectID, pollUID, 0);
+                voteMsg.addChecksum();
+                response = voteMsg;
+                return;
+            end
+
+            if msg.subtype == WSN_Config.CENSUS_POLL_YES || msg.subtype == WSN_Config.CENSUS_POLL_NO
+                [suspectID, pollUID, ~] = msg.getCensusPollPayload();
+                pIdx = find([obj.censusActivePolls.pollUID] == pollUID & [obj.censusActivePolls.suspectID] == suspectID, 1);
+                if isempty(pIdx), return; end
+                if ismember(sender, obj.censusActivePolls(pIdx).voterIDs), return; end
+
+                obj.censusActivePolls(pIdx).voterIDs = [obj.censusActivePolls(pIdx).voterIDs, sender];
+                obj.censusActivePolls(pIdx).totalVoters = obj.censusActivePolls(pIdx).totalVoters + 1;
+                if msg.subtype == WSN_Config.CENSUS_POLL_YES
+                    obj.censusActivePolls(pIdx).yesCount = obj.censusActivePolls(pIdx).yesCount + 1;
+                end
+                return;
+            end
+        end
+
+        function handleShutdownMessage(obj, msg, t)
+            [~, flags] = msg.getDownPayload();
+            switch msg.subtype
+                case WSN_Config.SHUTDOWN_SOFT_RESET
+                    obj.neighborTrust = struct('id',{}, 'score',{});
+                    obj.censusActivePolls = struct('pollUID',{}, 'suspectID',{}, 'startTick',{}, 'yesCount',{}, 'totalVoters',{}, 'voterIDs',{});
+                    obj.addLog(sprintf('t=%d [SHUTDOWN] SOFT_RESET - trust/poll state cleared', t));
+                case WSN_Config.SHUTDOWN_HARD_RESET
+                    obj.parent = [];
+                    obj.isOrphaned = true;
+                    obj.orphanCheckCount = 0;
+                    obj.neighborTrust = struct('id',{}, 'score',{});
+                    obj.addLog(sprintf('t=%d [SHUTDOWN] HARD_RESET - forced re-discovery', t));
+                case WSN_Config.SHUTDOWN_BLACKLIST
+                    obj.isBlacklisted = true;
+                    obj.addLog(sprintf('t=%d [SHUTDOWN] BLACKLIST - node permanently silenced', t));
+            end
+        end
+
         function handleHelloReception(obj, msg, t, rssi)
             % Populate neighbor table from Hello message
             sender = msg.src;

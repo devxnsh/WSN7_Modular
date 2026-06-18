@@ -3,6 +3,7 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
         id, pos, tier, typeStr, hexID = '0000'
         battery = 100.0
         isAwake = true
+        isBlacklisted = false   % ML_IDS_PLAN.md Phase 4: permanent silence after repeated Shutdown escalation
         offset = randi(WSN_Config.HelloInterval) - 1;
         txPower = 2.0
         radio
@@ -98,13 +99,16 @@ classdef WSN_Node < handle & matlab.mixin.Heterogeneous
         % UNIVERSAL RECEIVE (PROTOCOL GATEKEEPER)
         % --------------------------------------------------
         function response = receive(obj, msg, t, rssi)
+            response = [];
+            if obj.isBlacklisted
+                return;
+            end
             if ~msg.checksumOK
                 obj.addLog(sprintf( ...
                     't=%d [CHK_DROP] From %s', ...
                     t, obj.fmtID(msg.src)));
                 return;
             end
-            response = [];
 
             if ~obj.isAwake || obj.battery <= 0
                 return;

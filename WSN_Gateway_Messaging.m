@@ -298,7 +298,24 @@ classdef WSN_Gateway_Messaging < handle
                     t, msg.subtype, gw.fmtID(msg.src)), msg, t);
                 return;
             end
-            
+
+            % ML-IDS CENSUS (Type 11) - daisy-chain trust polling (ML_IDS_PLAN.md Phase 4)
+            if msg.type == WSN_Config.MSG_TYPE_CENSUS
+                if ~msg.verifyChecksum(), return; end
+                resp = gw.handleCensusMessage(msg, t);
+                if ~isempty(resp)
+                    actions{end+1} = struct('type', 'RESP', 'msg', resp);
+                end
+                return;
+            end
+
+            % ML-IDS SHUTDOWN (Type 12) - reset/blacklist enforcement (ML_IDS_PLAN.md Phase 4)
+            if msg.type == WSN_Config.MSG_TYPE_SHUTDOWN
+                if ~msg.verifyChecksum() || msg.dst ~= hex2dec(gw.hexID), return; end
+                gw.handleShutdownMessage(msg, t);
+                return;
+            end
+
             % Log RX for CMD messages only
             tag = msg.getTypeStr();
             if msg.type == 7
@@ -794,7 +811,17 @@ classdef WSN_Gateway_Messaging < handle
             
             % Parse and store sensor data locally
             obj.mergeSensorAgg(msg, t);
-            
+
+            % ML-IDS: record this CH's report arrival (silence detector,
+            % ML_IDS_PLAN.md Phase 4 follow-up) and clear any prior flag
+            idx = find([gw.chLastAggSeen.id] == sender, 1);
+            if isempty(idx)
+                gw.chLastAggSeen(end+1) = struct('id', sender, 'lastTime', t);
+            else
+                gw.chLastAggSeen(idx).lastTime = t;
+            end
+            gw.chAggSilenceFlagged = setdiff(gw.chAggSilenceFlagged, sender);
+
             % Sink handles 5.2 via override - no forwarding needed
             if isa(gw, 'WSN_Sink')
                 return;
@@ -1390,7 +1417,13 @@ classdef WSN_Gateway_Messaging < handle
                     gw.chChildren = [gw.chChildren, sender];
                 end
             end
-            
+
+            % ML-IDS: seed silence tracking at t=now, so a freshly-joined
+            % CH isn't immediately flagged as silent before its first report
+            if isempty(find([gw.chLastAggSeen.id] == sender, 1)) %#ok<EFIND>
+                gw.chLastAggSeen(end+1) = struct('id', sender, 'lastTime', t);
+            end
+
             gw.addLogAccess(sprintf('t=%d [CH_JOINED] %s added to children', ...
                 t, dec2hex(uint16(sender), 4)), [], t);
             
