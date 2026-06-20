@@ -13,7 +13,7 @@ classdef WSN_Config
         TIER_SENSOR = 1; TIER_CH = 2; TIER_GWN = 3;
 
         % --- STATES ---
-        STATE_BOOT = 0; STATE_DISCOVERY = 1; STATE_HANDSHAKE = 2; STATE_SECURE = 3; STATE_DORMANT = 4;
+        STATE_BOOT = 0; STATE_DISCOVERY = 1; STATE_HANDSHAKE = 2; STATE_SECURE = 3;
         
         % --- PHASE RADIO STATES (GWN Backbone) ---
         PHASE_RX = 0;    % Listening to children
@@ -153,13 +153,19 @@ classdef WSN_Config
         % --- CH RECRUITMENT TIMING ---
         CH_ACCESS_LOCK_TIMER = 4;   % Access radio lock duration for CH handshake
         CH_MAX_RETRIES = 5;         % Max retries per GWN for any CH
-        
-        % --- CH DYNAMIC VOLTAGE SCALING (DVS) ---
-        CH_DVS_ENABLED = true;              % Enable dynamic voltage scaling
-        CH_DVS_SCALE_FACTOR = 1.5;          % Power multiplier on scale-up
-        CH_DVS_MAX_POWER = 6.0;             % Maximum TX power for CH after scaling
-        CH_DVS_MAX_SCALE_ATTEMPTS = 2;      % Max times CH can scale up before dormant
-        
+        CH_REJECTED_LIST_RESET_INTERVAL = 40;  % Ticks before forgiving old rejections/timeouts
+
+        % --- GWN CH-DISCOVERY DYNAMIC VOLTAGE SCALING (DVS) ---
+        % Moved from the old CH-side DVS (IDS_METRICS_IMPROVEMENT_PLAN.md):
+        % GWNs, not power-constrained CHs, now do the power-scaling to
+        % extend discovery range to distant/orphaned CHs. Reuses
+        % MaxGWNPower as the cap, consistent with the existing GWN-GWN
+        % backbone DVS in WSN_Gateway_Behavior.m.
+        GWN_CH_DVS_ENABLED = true;          % Enable CH-discovery power scaling
+        GWN_CH_DVS_CHECK_INTERVAL = 50;     % Ticks between stall checks
+        GWN_CH_DVS_SCALE_FACTOR = 1.2;      % controlPower multiplier on scale-up
+        GWN_CH_DVS_MAX_SCALE_ATTEMPTS = 5;  % Max scale-ups (controlPower capped at MaxGWNPower regardless)
+
         % --- SENSOR ORPHAN SLEEP MODE ---
         SENSOR_ORPHAN_SLEEP_FACTOR = 0.75;  % 75% longer sleep when orphaned
         SENSOR_ORPHAN_WAKE_WINDOW = 1;      % Narrower wake window when orphaned
@@ -226,6 +232,7 @@ classdef WSN_Config
         ActiveRefresh = 1;
         HandshakeTimeout = 6;
         MAX_RETRIES = 4;
+        GWN_REJECTED_RESET_INTERVAL = 50;  % Ticks before forgiving old GWN-GWN ST_REJECT statuses
 
     end
 end

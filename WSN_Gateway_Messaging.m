@@ -778,13 +778,28 @@ classdef WSN_Gateway_Messaging < handle
                 return;  % Sink will handle via override
             end
             
-            % Need parent to forward
+            % Need parent to forward. Buffer instead of dropping -- this
+            % GWN may not have found its own backbone parent yet, but the
+            % CH this describes is still real; flushPendingChHelloForward()
+            % (called every tick from WSN_Gateway.step()) sends it once a
+            % parent is available, instead of permanently losing it.
             if isempty(gw.parent)
-                gw.addLogBackbone(sprintf('t=%d [DROP] CH_HELLO - no parent', t), [], t);
+                if numel(gw.pendingChHelloForward) >= gw.PENDING_CH_HELLO_MAX
+                    gw.pendingChHelloForward(1) = [];  % drop oldest, keep buffer bounded
+                end
+                gw.pendingChHelloForward{end+1} = msg;
+                gw.addLogBackbone(sprintf('t=%d [BUFFER] CH_HELLO - no parent yet (queued=%d)', ...
+                    t, numel(gw.pendingChHelloForward)), [], t);
                 return;
             end
-            
-            % Create forward message
+
+            fwd = obj.buildChHelloForward(msg, t);
+            obj.enqueueLocal(fwd, t);
+        end
+
+        function fwd = buildChHelloForward(obj, msg, t)
+            % Build a forwarded CH_HELLO (5.0/5.1) addressed to our current parent
+            gw = obj.gw;
             fwd = WSN_Message();
             fwd.type = WSN_Config.MSG_TYPE_CH_HELLO;
             fwd.subtype = msg.subtype;
@@ -796,9 +811,23 @@ classdef WSN_Gateway_Messaging < handle
             fwd.payload = msg.payload;      % Preserve payload (CH ID, Parent GWN ID)
             fwd.payloadLen = msg.payloadLen;
             fwd.addChecksum();
-            
-            % Queue for phase-scheduled transmission (local data)
-            obj.enqueueLocal(fwd, t);
+        end
+
+        function flushPendingChHelloForward(obj, t)
+            % Called every tick from WSN_Gateway.step(). Sends any CH_HELLO
+            % messages that were buffered while this GWN had no backbone
+            % parent, now that one is available.
+            gw = obj.gw;
+            if isempty(gw.pendingChHelloForward) || isempty(gw.parent)
+                return;
+            end
+            for i = 1:numel(gw.pendingChHelloForward)
+                fwd = obj.buildChHelloForward(gw.pendingChHelloForward{i}, t);
+                obj.enqueueLocal(fwd, t);
+            end
+            gw.addLogBackbone(sprintf('t=%d [FLUSH] Sent %d buffered CH_HELLO to parent %s', ...
+                t, numel(gw.pendingChHelloForward), gw.fmtID(gw.parent)), [], t);
+            gw.pendingChHelloForward = {};
         end
         
         function actions = handle_SENSOR_AGG(obj, msg, t)
@@ -1426,12 +1455,13 @@ classdef WSN_Gateway_Messaging < handle
 
             gw.addLogAccess(sprintf('t=%d [CH_JOINED] %s added to children', ...
                 t, dec2hex(uint16(sender), 4)), [], t);
-            
-            % Send 5.1 CH_HELLO to parent (queue for phase-scheduled TX)
-            if ~isempty(gw.parent)
-                chHelloMsg = obj.createCHHello(sender, t);
-                obj.enqueueLocal(chHelloMsg, t);
-            end
+
+            % Mark stale so announcePendingChChildren() (called every tick
+            % from WSN_Gateway.step()) picks this up -- sends now if we
+            % already have a backbone parent, or as soon as we get one.
+            % Was previously a fire-once send here that silently dropped
+            % forever if gw.parent was empty at this exact tick.
+            gw.chChildrenAnnouncedToParent = [];
         end
         
         function actions = handle_CH_JOINOK(obj, msg, t)
@@ -1487,12 +1517,38 @@ classdef WSN_Gateway_Messaging < handle
             
             gw.addLogAccess(sprintf('t=%d [SECONDARY_CH] %s recruited by %s', ...
                 t, dec2hex(uint16(recruitedID), 4), dec2hex(uint16(sender), 4)), [], t);
-            
-            % Forward CH_HELLO to parent for secondary child (phase-gated)
-            if ~isempty(gw.parent)
-                chHelloMsg = obj.createCHHello(recruitedID, t);
-                obj.enqueueLocal(chHelloMsg, t, sprintf('CH_HELLO secondary CH=%s', gw.fmtID(recruitedID)));
+
+            % Track separately from first-degree chChildren (see property
+            % comment on WSN_Gateway.secondaryChChildren) and mark stale so
+            % announcePendingChChildren() picks it up -- same fire-once
+            % drop-forever bug as handle_CH_KEY_ACK above, fixed the same way.
+            if ~ismember(recruitedID, gw.secondaryChChildren)
+                gw.secondaryChChildren = [gw.secondaryChChildren, recruitedID];
             end
+            gw.chChildrenAnnouncedToParent = [];
+        end
+
+        function announcePendingChChildren(obj, t)
+            % Called every tick from WSN_Gateway.step(). Sends a 5.1
+            % CH_HELLO up the backbone for every CH (direct or secondary)
+            % this GWN knows about, whenever the announced-to parent is
+            % stale (no parent yet, parent just changed, or a new CH was
+            % added since the last full announce). Re-announces everyone
+            % on a parent change since the new parent doesn't know any of
+            % them yet. See WSN_Gateway.chChildrenAnnouncedToParent.
+            gw = obj.gw;
+            if isa(gw, 'WSN_Sink'), return; end  % Sink terminates CH_HELLO, doesn't forward
+            if isempty(gw.parent), return; end
+            if isequal(gw.chChildrenAnnouncedToParent, gw.parent), return; end
+
+            allCH = [gw.chChildren, gw.secondaryChChildren];
+            for i = 1:numel(allCH)
+                chHelloMsg = obj.createCHHello(allCH(i), t);
+                obj.enqueueLocal(chHelloMsg, t);
+                gw.addLogBackbone(sprintf('t=%d [CH_HELLO] (re)announce CH=%s -> parent %s', ...
+                    t, gw.fmtID(allCH(i)), gw.fmtID(gw.parent)), [], t);
+            end
+            gw.chChildrenAnnouncedToParent = gw.parent;
         end
         
         function localKey = generateLocalKeyForCH(obj, chID)

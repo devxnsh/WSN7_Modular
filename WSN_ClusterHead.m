@@ -12,15 +12,11 @@ classdef WSN_ClusterHead < WSN_Node
         retryCount = 0                 % Attempts so far for current target
         rejectedGWNs = []              % List of GWNs that rejected/timed out
         handshakePartner = []          % Lock partner during handshake
-        isQualifiedToRecruit = false   % Can recruit other CHs (set true after receiving local key)
+        isQualifiedToRecruit = false   % Can recruit other CHs (true only when GWN-anchored -- caps CH-CH chains at one hop)
         rejectedCHs = []               % List of CHs that rejected
         retryBackoff = 0               % Randomized backoff timer (2-5 timeframes)
-        
-        % --- DYNAMIC VOLTAGE SCALING (DVS) ---
-        dvsScaleCount = 0              % Number of times power has been scaled up
-        dvsOriginalPower = 0           % Original TX power before scaling
-        dvsAllExhaustedOnce = false    % Flag: all neighbors exhausted at least once
-        
+        lastRejectResetTime = 0        % Last time rejectedGWNs/rejectedCHs were cleared
+
         % --- SENSOR DATA AGGREGATION ---
         sensorTable = struct('id',{}, 'lastTime',{}, 'value',{}, 'rssi',{}, 'battery',{})
         aggPeriod = 0                  % Fixed random period 7-10 TFs (set after verification)
@@ -50,7 +46,6 @@ classdef WSN_ClusterHead < WSN_Node
             obj@WSN_Node(id, pos, WSN_Config.TIER_CH);
             obj.typeStr = 'CH';
             obj.txPower = WSN_Config.TxPower_CH;
-            obj.dvsOriginalPower = WSN_Config.TxPower_CH;  % Store original power
             obj.state = WSN_Config.STATE_BOOT;
         end
         
@@ -165,7 +160,18 @@ classdef WSN_ClusterHead < WSN_Node
                 obj.retryBackoff = obj.retryBackoff - 1;
                 return;
             end
-            
+
+            % Periodically forgive old rejections/timeouts -- a neighbor
+            % rejected early (e.g. busy with another handshake) may be a
+            % perfectly good target later. Without this, rejectedGWNs/
+            % rejectedCHs only grow, and a CH with few nearby neighbors
+            % could exhaust all of them permanently.
+            if isempty(obj.retryTarget) && t >= obj.lastRejectResetTime + WSN_Config.CH_REJECTED_LIST_RESET_INTERVAL
+                obj.rejectedGWNs = [];
+                obj.rejectedCHs = [];
+                obj.lastRejectResetTime = t;
+            end
+
             switch obj.state
                 case WSN_Config.STATE_BOOT
                     % Transition to DISCOVERY after SetupTime
@@ -195,42 +201,17 @@ classdef WSN_ClusterHead < WSN_Node
                     if isempty(obj.retryTarget)
                         target = obj.findBestVerifiedGWN();
                         if isempty(target)
-                            % No more GWNs, try CHs
+                            % No more GWNs, try CHs (only GWN-anchored CHs
+                            % accept recruits -- see handleCHREQ)
                             target = obj.findBestVerifiedCH();
                             if isempty(target)
-                                % === DYNAMIC VOLTAGE SCALING (DVS) ===
-                                % All verified neighbors exhausted - attempt power scale-up
-                                if WSN_Config.CH_DVS_ENABLED && ...
-                                   obj.dvsScaleCount < WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS
-                                    % Scale up power
-                                    newPower = min(obj.txPower * WSN_Config.CH_DVS_SCALE_FACTOR, ...
-                                                   WSN_Config.CH_DVS_MAX_POWER);
-                                    
-                                    if newPower > obj.txPower
-                                        obj.txPower = newPower;
-                                        obj.dvsScaleCount = obj.dvsScaleCount + 1;
-                                        obj.dvsAllExhaustedOnce = true;
-                                        
-                                        % Reset rejected lists - allow retry on all neighbors
-                                        obj.rejectedGWNs = [];
-                                        obj.rejectedCHs = [];
-                                        
-                                        obj.addLog(sprintf('t=%d [DVS] Power scaled to %.1f (attempt %d/%d) - retrying all neighbors', ...
-                                            t, obj.txPower, obj.dvsScaleCount, WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS));
-                                        
-                                        % Set backoff before retry
-                                        obj.retryBackoff = randi([3 7]);
-                                        return;
-                                    end
-                                elseif obj.dvsScaleCount >= WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS
-                                    % Max DVS attempts reached - enter DORMANT state
-                                    if obj.state ~= WSN_Config.STATE_DORMANT
-                                        obj.state = WSN_Config.STATE_DORMANT;
-                                        obj.addLog(sprintf('t=%d [DVS_EXHAUSTED] Max scale attempts (%d) reached - entering DORMANT', ...
-                                            t, WSN_Config.CH_DVS_MAX_SCALE_ATTEMPTS));
-                                    end
-                                end
-                                return;  % No targets available
+                                % No candidate visible yet. Don't give up --
+                                % just wait: neighborTable keeps updating from
+                                % HELLO reception every tick regardless of
+                                % state, so the next verified GWN/CH to come
+                                % into range (or get verified) is picked up
+                                % automatically next tick.
+                                return;
                             end
                         end
                         obj.retryTarget = target;
@@ -365,9 +346,12 @@ classdef WSN_ClusterHead < WSN_Node
             response = [];
             sender = msg.src;
             
-            % Must be verified to recruit (all verified CHs can recruit)
-            if ~obj.isVerified
-                obj.addLog(sprintf('t=%d [CH_REJECT] %s (not verified)', ...
+            % Only GWN-anchored CHs may recruit further CHs -- caps every
+            % CH-CH chain at one hop (orphan-CH -> relay-CH -> GWN), instead
+            % of the relay-CH itself being recruited through and extending
+            % the chain indefinitely.
+            if ~obj.isQualifiedToRecruit
+                obj.addLog(sprintf('t=%d [CH_REJECT] %s (not qualified to recruit -- not GWN-anchored)', ...
                     t, dec2hex(uint16(sender), 4)));
                 response = obj.createCHREJECT(sender, t);
                 return;
@@ -422,7 +406,7 @@ classdef WSN_ClusterHead < WSN_Node
             obj.parent = sender;
             % Note: localKey stays empty - no key exchange in CH-CH
             obj.isVerified = true;
-            obj.isQualifiedToRecruit = true;  % Can recruit further
+            obj.isQualifiedToRecruit = false;  % Not GWN-anchored -- cannot recruit further (one CH-CH hop max)
             obj.state = WSN_Config.STATE_SECURE;
             obj.retryTarget = [];
             obj.retryCount = 0;
@@ -505,6 +489,7 @@ classdef WSN_ClusterHead < WSN_Node
                 obj.addLog(sprintf('t=%d [PURGE] parent %s (rejected)', t, dec2hex(uint16(sender),4)));
                 obj.parent = [];
                 obj.isVerified = false;
+                obj.isQualifiedToRecruit = false;
                 obj.localKey = [];  % Purge local key on rejection
             end
             
@@ -935,6 +920,7 @@ classdef WSN_ClusterHead < WSN_Node
                 case WSN_Config.SHUTDOWN_HARD_RESET
                     obj.parent = [];
                     obj.isVerified = false;
+                    obj.isQualifiedToRecruit = false;
                     obj.localKey = [];
                     obj.state = WSN_Config.STATE_BOOT;
                     obj.neighborTrust = struct('id',{}, 'score',{});

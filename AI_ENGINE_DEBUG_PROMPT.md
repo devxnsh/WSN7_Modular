@@ -909,3 +909,53 @@ Next steps:
   than regenerated, since dataset rows/labels don't depend on either fix (see caveat in
   `DATASET_GENERATION.md`).
 
+## CH Recruitment: DORMANT Dead-End and Chain-Depth Fix (2026-06-20)
+
+Found while implementing `IDS_METRICS_IMPROVEMENT_PLAN.md`'s CH-tier attack retiering: only
+~6 of a topology's ~16-20 CHs ever registered with the Sink in a 2000-tick run, regardless of
+attack status — most CH telemetry (Normal or malicious) was silently invisible to the global
+model. Root cause was **not** RF-range geometry as first suspected (CH-CH relay chains of up
+to 9 hops were observed working), but a state-machine dead end:
+
+- **`STATE_DORMANT`** (the §2.1 entry above) had no case in `WSN_ClusterHead.m`'s `step()`
+  switch. A CH that exhausted its currently-known GWN/CH candidates plus DVS power-scale
+  attempts entered DORMANT and silently did nothing forever after — even though it kept
+  passively learning about new neighbors via HELLO reception (not state-gated), it never
+  re-checked them. Early in a simulation, when most of the network is still unverified, this
+  is a frequent race, not a rare edge case.
+- **Fix**: removed the DVS-then-DORMANT block entirely. When no candidate is currently visible,
+  the CH just waits (returns, stays in `STATE_SECURE`) — `findBestVerifiedGWN()`/
+  `findBestVerifiedCH()` already re-scan the live, continuously-updated `neighborTable` every
+  tick, so a newly-verified neighbor is picked up automatically next tick. No new "retry"
+  machinery was needed. `STATE_DORMANT` removed from `WSN_Config.m` (zero remaining references
+  after the fix; `WSN_Physics.m`'s `updateBatteryAndSleep` mention was already dead/uncalled
+  code, untouched).
+- **Chain-depth cap**: `isQualifiedToRecruit` was an existing, already-correctly-named property
+  ("set true after receiving local key") that was never actually read anywhere — `handleCHREQ`
+  gated acceptance on `isVerified` alone, and `handleCHJOINOK` (the CH-CH join path, which
+  explicitly has no key exchange) incorrectly set it `true` anyway, contradicting its own
+  doc-comment. Fixed both: `handleCHJOINOK` now sets it `false`, and `handleCHREQ` gates on
+  `~isQualifiedToRecruit`. Net effect: only GWN-anchored CHs can accept further CH recruits,
+  capping every chain at exactly one CH-CH hop (orphan-CH → relay-CH → GWN) instead of
+  unbounded depth.
+- **DVS moved from CH to GWN**: the old CH-side DVS scaled the recruiting CH's own `txPower`
+  to compensate for a coverage gap — burning a power-constrained CH's battery to fix what is
+  structurally a GWN coverage problem. Removed entirely from `WSN_ClusterHead.m`. Added
+  `WSN_Gateway.checkChDiscoveryDVS()` instead: every `GWN_CH_DVS_CHECK_INTERVAL` ticks, if
+  `chChildren` hasn't grown since the last check, scale `controlPower` up (capped at the
+  existing `MaxGWNPower`, reusing the same cap as the pre-existing GWN-GWN backbone DVS in
+  `WSN_Gateway_Behavior.m:557-559`, a different mechanism for a different recruitment
+  direction — GWN-GWN is rejection-driven since GWNs actively recruit each other, CH-discovery
+  is stall-driven since CHs recruit passively by sending CH_REQ on hearing a HELLO). Since
+  `WSN_Physics.m`'s range calculation already uses `controlPower` for tier-3 nodes, this
+  directly extends real broadcast/discovery range to reach distant CHs.
+- **Also fixed**: `rejectedGWNs`/`rejectedCHs` previously only grew, with periodic clears tied
+  to DVS scale-up events (now removed). Without that reset, a CH with few nearby neighbors
+  could still exhaust them all permanently. Added an independent periodic reset
+  (`CH_REJECTED_LIST_RESET_INTERVAL = 40` ticks) decoupled from DVS, so a neighbor rejected
+  early (e.g. busy with another handshake at the time) gets retried later.
+
+Verification: re-ran a clean (no-attacker) topology at the same duration/warmup as the
+pre-fix baseline and compared distinct registered-CH counts and `HopCount` distribution in
+`sink_dataset.csv` (see `DATASET_GENERATION.md` for the before/after numbers).
+

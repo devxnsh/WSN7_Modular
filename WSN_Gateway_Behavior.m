@@ -11,6 +11,7 @@ classdef WSN_Gateway_Behavior < handle
         retryTarget    = []      % current neighbor being recruited
         retryCount     = 0       % attempts so far
         retryBackoff   = 0       % randomized backoff timer
+        lastRejectResetTime = 0  % last time neighborTable ST_REJECT statuses were forgiven
 
     end
 
@@ -137,6 +138,24 @@ classdef WSN_Gateway_Behavior < handle
                         gw.state = WSN_Config.STATE_DISCOVERY;
                     end
                 end
+            end
+
+            % =================================================
+            % PERIODICALLY FORGIVE OLD ST_REJECT (GWN-GWN backbone)
+            % =================================================
+            % ST_REJECT never resets otherwise -- a neighbor rejected early
+            % during bootstrap-time contention (when most of the network is
+            % still unverified) stays permanently blacklisted, same class
+            % of bug as WSN_ClusterHead's rejectedGWNs/rejectedCHs fixed in
+            % IDS_METRICS_IMPROVEMENT_PLAN.md. Without this, a GWN whose
+            % only nearby neighbors got rejected early could never be
+            % recruited by, or recruit, anyone again.
+            if ~isempty(gw.neighborTable) && t >= obj.lastRejectResetTime + WSN_Config.GWN_REJECTED_RESET_INTERVAL
+                rejIdx = find([gw.neighborTable.status] == gw.ST_REJECT);
+                if ~isempty(rejIdx)
+                    [gw.neighborTable(rejIdx).status] = deal(gw.ST_NONE);
+                end
+                obj.lastRejectResetTime = t;
             end
 
             % =================================================

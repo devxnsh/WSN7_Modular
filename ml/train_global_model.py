@@ -43,7 +43,7 @@ from wsn_ids_common import (
 LEAK_OR_META_COLUMNS = [
     "WindowStart", "WindowEnd", "NodeIdx", "NodeHexID",
     "AttackType", "AttackTypeName", "IsMalicious",
-    "ScenarioID", "RequestedAttackType", "RequestedIntensity", "AttackerNodeIdx",
+    "ScenarioID", "RequestedAttackType", "RequestedAttackerTier", "RequestedIntensity", "AttackerNodeIdx",
 ]
 
 # RSSIQualityBucket is dropped: WSN_SinkFeatureExport.m buckets it into ~250

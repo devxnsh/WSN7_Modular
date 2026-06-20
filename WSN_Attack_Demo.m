@@ -13,21 +13,32 @@ function WSN_Attack_Demo(varargin)
 %   WSN_Attack_Demo('intensities', [1 10])         % override intensity levels
 %   WSN_Attack_Demo('duration', 1000)              % ticks per scenario
 %   WSN_Attack_Demo('warmup', 400)                 % ticks before attack activates
-%   WSN_Attack_Demo('attackerTier', WSN_Config.TIER_CH)  % attack from a CH instead of a Sensor
+%   WSN_Attack_Demo('attackerTier', WSN_Config.TIER_CH)  % ad-hoc override:
+%       force every scenario to use this single tier instead of the
+%       evidence-backed per-attack-type default table below.
 %   WSN_Attack_Demo('includeNormalBaseline', false)
+%
+% PER-ATTACK-TYPE TIER DEFAULTS (IDS_METRICS_IMPROVEMENT_PLAN.md):
+%   Flooding, PanicFlood        -> Sensor only (valid at Sensor by design)
+%   Blackhole, Grayhole,
+%   Wormhole, DenialOfSleep     -> CH only (relay/drain-dependent; Sensor-tier
+%                                  variants don't match the attack's definition)
+%   Sybil                       -> Sensor, CH, AND GWN (identity-impersonation
+%                                  range scales with the host's real tier --
+%                                  see WSN_Attack.m:362-421)
 %
 % NOTE ON RUNTIME: each scenario is a full WSN_Main(...) simulation run.
 % In a slow/sandboxed environment this can take many minutes per scenario;
-% the default grid (1 baseline + 7 attack types x 3 intensities = 22 runs)
-% can take hours. Tune 'intensities' and 'duration' down for a quick test,
-% and see DATASET_GENERATION.md for guidance on scaling the grid up once
-% you know your environment's per-tick cost.
+% the default grid (1 baseline + 6 sensor-tier + 12 CH-tier + 9 sybil-tier
+% scenarios = 28 runs) can take hours. Tune 'intensities' and 'duration'
+% down for a quick test, and see DATASET_GENERATION.md for guidance on
+% scaling the grid up once you know your environment's per-tick cost.
 
 opts = struct( ...
     'intensities', [1, 3, 5, 7, 10], ...
     'duration', 2000, ...
     'warmup', 600, ...
-    'attackerTier', WSN_Config.TIER_SENSOR, ...
+    'attackerTier', -1, ...  % -1 = use per-attack-type default table below
     'includeNormalBaseline', true, ...
     'attackTypes', [WSN_Attack.ATTACK_FLOODING, WSN_Attack.ATTACK_PANIC_FLOOD, WSN_Attack.ATTACK_SYBIL, ...
                      WSN_Attack.ATTACK_BLACKHOLE, WSN_Attack.ATTACK_WORMHOLE, WSN_Attack.ATTACK_GRAYHOLE, ...
@@ -42,13 +53,33 @@ if ~exist(opts.outDir, 'dir')
     mkdir(opts.outDir);
 end
 
+% Per-attack-type tier defaults, used unless opts.attackerTier was
+% explicitly overridden (see header comment above).
+defaultTiers = containers.Map('KeyType', 'double', 'ValueType', 'any');
+defaultTiers(WSN_Attack.ATTACK_FLOODING)     = WSN_Config.TIER_SENSOR;
+defaultTiers(WSN_Attack.ATTACK_PANIC_FLOOD)  = WSN_Config.TIER_SENSOR;
+defaultTiers(WSN_Attack.ATTACK_SYBIL)        = [WSN_Config.TIER_SENSOR, WSN_Config.TIER_CH, WSN_Config.TIER_GWN];
+defaultTiers(WSN_Attack.ATTACK_BLACKHOLE)    = WSN_Config.TIER_CH;
+defaultTiers(WSN_Attack.ATTACK_GRAYHOLE)     = WSN_Config.TIER_CH;
+defaultTiers(WSN_Attack.ATTACK_WORMHOLE)     = WSN_Config.TIER_CH;
+defaultTiers(WSN_Attack.ATTACK_DENIAL_SLEEP) = WSN_Config.TIER_CH;
+
 scenarios = {};
 if opts.includeNormalBaseline
-    scenarios{end+1} = struct('attackType', WSN_Attack.ATTACK_NONE, 'intensity', 0);
+    scenarios{end+1} = struct('attackType', WSN_Attack.ATTACK_NONE, 'intensity', 0, 'tier', 0);
 end
 for a = opts.attackTypes
-    for inten = opts.intensities
-        scenarios{end+1} = struct('attackType', a, 'intensity', inten); %#ok<AGROW>
+    if opts.attackerTier ~= -1
+        tiers = opts.attackerTier;  % ad-hoc override: force one tier for all types
+    elseif isKey(defaultTiers, a)
+        tiers = defaultTiers(a);
+    else
+        tiers = WSN_Config.TIER_SENSOR;  % fallback for any future attack type
+    end
+    for tier = tiers
+        for inten = opts.intensities
+            scenarios{end+1} = struct('attackType', a, 'intensity', inten, 'tier', tier); %#ok<AGROW>
+        end
     end
 end
 
@@ -57,7 +88,7 @@ sinkTables = {};
 
 for s = 1:numel(scenarios)
     sc = scenarios{s};
-    scenarioID = sprintf('S%03d_AT%d_I%d', s, sc.attackType, sc.intensity);
+    scenarioID = sprintf('S%03d_AT%d_TR%d_I%d', s, sc.attackType, sc.tier, sc.intensity);
     fprintf('\n=== SCENARIO %d/%d: %s ===\n', s, numel(scenarios), scenarioID);
 
     nodes = WSN_TopologyGenerator.generateTopology(WSN_Config.NodeCount, WSN_Config.FieldSize);
@@ -65,10 +96,29 @@ for s = 1:numel(scenarios)
 
     attackerIdx = 0;
     if sc.attackType ~= WSN_Attack.ATTACK_NONE
-        candidates = find(arrayfun(@(n) n.tier == opts.attackerTier, nodes));
+        candidates = find(arrayfun(@(n) n.tier == sc.tier, nodes));
         candidates = candidates(~arrayfun(@(i) isa(nodes(i), 'WSN_Sink'), candidates));
+
+        % CH-tier candidates: a CH with no physical path (<=2 hops) to any
+        % GWN can never register with the Sink, no matter how long the
+        % simulation runs or how robust the recruitment retry logic is --
+        % pure RF/geometric isolation (a real topology characteristic, not
+        % a protocol bug; see IDS_METRICS_IMPROVEMENT_PLAN.md and the
+        % "CH Recruitment" entry in AI_ENGINE_DEBUG_PROMPT.md). Filter
+        % these out before picking, so the scenario doesn't burn a full
+        % run on an attacker that can never produce sink-visible labels.
+        if sc.tier == WSN_Config.TIER_CH
+            physAdj = WSN_Physics.updateConnectivity(nodes);
+            linkAdj = physAdj | physAdj';  % either-direction link counts for this static pre-filter
+            gwnIdx = find(arrayfun(@(n) n.tier == WSN_Config.TIER_GWN, nodes));
+            hop1 = any(linkAdj(:, gwnIdx), 2)';
+            hop2 = any(linkAdj(:, hop1), 2)';
+            reachable = hop1 | hop2;
+            candidates = candidates(reachable(candidates));
+        end
+
         if isempty(candidates)
-            fprintf('  [SKIP] no eligible tier-%d node for attacker\n', opts.attackerTier);
+            fprintf('  [SKIP] no eligible tier-%d node for attacker (none reachable)\n', sc.tier);
             continue;
         end
         attackerIdx = candidates(randi(numel(candidates)));
@@ -95,6 +145,7 @@ for s = 1:numel(scenarios)
         tl = readFeatureCSV(fullfile(opts.outDir, newLocal{1}));
         tl.ScenarioID = repmat({scenarioID}, height(tl), 1);
         tl.RequestedAttackType = repmat(sc.attackType, height(tl), 1);
+        tl.RequestedAttackerTier = repmat(sc.tier, height(tl), 1);
         tl.RequestedIntensity = repmat(sc.intensity, height(tl), 1);
         tl.AttackerNodeIdx = repmat(attackerIdx, height(tl), 1);
         localTables{end+1} = tl; %#ok<AGROW>
@@ -106,6 +157,7 @@ for s = 1:numel(scenarios)
         ts = readFeatureCSV(fullfile(opts.outDir, newSink{1}));
         ts.ScenarioID = repmat({scenarioID}, height(ts), 1);
         ts.RequestedAttackType = repmat(sc.attackType, height(ts), 1);
+        ts.RequestedAttackerTier = repmat(sc.tier, height(ts), 1);
         ts.RequestedIntensity = repmat(sc.intensity, height(ts), 1);
         ts.AttackerNodeIdx = repmat(attackerIdx, height(ts), 1);
         sinkTables{end+1} = ts; %#ok<AGROW>

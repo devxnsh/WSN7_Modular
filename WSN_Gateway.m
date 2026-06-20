@@ -42,8 +42,44 @@ classdef WSN_Gateway < WSN_Node
         logAccess = {}     % HC12 access radio logs
         
         % -------- CH CHILDREN (separate from GWN children) --------
-        chChildren = []          % List of recruited CH IDs
+        chChildren = []          % List of recruited (first-degree) CH IDs
+        secondaryChChildren = [] % CH IDs learned about via a relay-CH's CH_INFO (not direct children)
         chLocalKeys = containers.Map()  % Map of CH hexID to local key
+
+        % --- CH REGISTRATION ANNOUNCE-TO-BACKBONE TRACKING ---
+        % Notifying the Sink of a CH child (direct or secondary) used to be
+        % a fire-once CH_HELLO sent the moment it was learned about -- if
+        % this GWN didn't have its own backbone parent at that exact tick,
+        % the notification was silently dropped forever (see
+        % IDS_METRICS_IMPROVEMENT_PLAN.md / AI_ENGINE_DEBUG_PROMPT.md
+        % "CH Recruitment" entry). Track the parent ID the full chChildren/
+        % secondaryChChildren set was last announced to, and re-announce
+        % whenever it goes stale (no parent yet, or parent changed/was
+        % newly acquired, or a new CH was added).
+        chChildrenAnnouncedToParent = []
+
+        % --- PENDING CH_HELLO RELAY BUFFER ---
+        % A multi-hop relay of someone else's CH_HELLO has the same
+        % drop-forever bug as the registration case above, just one layer
+        % further out: WSN_Gateway_Messaging.handle_CH_HELLO used to drop
+        % an inbound CH_HELLO permanently if THIS GWN didn't have its own
+        % parent at the exact tick it arrived. Buffer it instead and flush
+        % once a parent is available (see flushPendingChHelloForward()).
+        pendingChHelloForward = {}  % Cell array of raw WSN_Message objects awaiting a parent
+        PENDING_CH_HELLO_MAX = 30   % Cap to avoid unbounded growth if permanently orphaned
+
+        % --- CH-DISCOVERY DYNAMIC VOLTAGE SCALING (DVS) ---
+        % CHs are recruited passively (they send CH_REQ on hearing our
+        % HELLO; we never "search" for them), so unlike the GWN-GWN
+        % backbone DVS above, there's no rejection signal to react to --
+        % instead, periodically check whether chChildren has grown since
+        % the last check, and if not, boost controlPower so our HELLO/
+        % CH_ACK reach further out (see IDS_METRICS_IMPROVEMENT_PLAN.md;
+        % moved here from the old CH-side DVS, which wasted a power-
+        % constrained CH's own battery compensating for a GWN coverage gap).
+        chDvsLastCheckTime = 0
+        chDvsLastChildCount = 0
+        chDvsScaleCount = 0
 
         % --- ML-IDS REPORTING-SILENCE DETECTOR (ML_IDS_PLAN.md Phase 4 follow-up) ---
         % Tracks last 5.2 SENSOR_AGG arrival per CH child -- catches a
@@ -242,6 +278,43 @@ classdef WSN_Gateway < WSN_Node
                     t, obj.battery), [], t);
                 obj.scheduleNextHelloBurst(t);
             end
+
+            % ---- CH-DISCOVERY DVS: periodic stall check ----
+            obj.checkChDiscoveryDVS(t);
+
+            % ---- ANNOUNCE PENDING CH CHILDREN TO BACKBONE PARENT ----
+            obj.messaging.announcePendingChChildren(t);
+
+            % ---- FLUSH BUFFERED CH_HELLO RELAYS ----
+            obj.messaging.flushPendingChHelloForward(t);
+        end
+
+        function checkChDiscoveryDVS(obj, t)
+            % Periodically check whether chChildren has grown since the
+            % last check; if not, scale controlPower up so HELLO/CH_ACK
+            % reach further out to distant/orphaned CHs. See property
+            % comment above chDvsLastCheckTime for rationale.
+            if ~WSN_Config.GWN_CH_DVS_ENABLED, return; end
+            if t < obj.chDvsLastCheckTime + WSN_Config.GWN_CH_DVS_CHECK_INTERVAL
+                return;
+            end
+
+            currentCount = numel(obj.chChildren);
+            stalled = currentCount <= obj.chDvsLastChildCount;
+
+            if stalled && obj.chDvsScaleCount < WSN_Config.GWN_CH_DVS_MAX_SCALE_ATTEMPTS ...
+                    && obj.controlPower < WSN_Config.MaxGWNPower
+                oldPower = obj.controlPower;
+                obj.controlPower = min(WSN_Config.MaxGWNPower, ...
+                    obj.controlPower * WSN_Config.GWN_CH_DVS_SCALE_FACTOR);
+                obj.chDvsScaleCount = obj.chDvsScaleCount + 1;
+                obj.addLogAccess(sprintf('t=%d [CH_DVS] No new CH children since t=%d -- controlPower %.2f -> %.2f (attempt %d/%d)', ...
+                    t, obj.chDvsLastCheckTime, oldPower, obj.controlPower, ...
+                    obj.chDvsScaleCount, WSN_Config.GWN_CH_DVS_MAX_SCALE_ATTEMPTS), [], t);
+            end
+
+            obj.chDvsLastCheckTime = t;
+            obj.chDvsLastChildCount = currentCount;
         end
     end
 

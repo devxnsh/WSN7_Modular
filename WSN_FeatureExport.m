@@ -66,6 +66,8 @@ classdef WSN_FeatureExport
             d.lastAggSentTime  = zeros(1, numNodes);
             d.prevPhase        = -ones(1, numNodes);
             d.phaseRunLen      = zeros(1, numNodes);
+            d.batteryAtWindowStart = arrayfun(@(n) n.battery, nodes);
+            d.lastSuccessTxTick    = zeros(1, numNodes);
 
             d.rows = {};
 
@@ -107,7 +109,7 @@ classdef WSN_FeatureExport
             WSN_FeatureExport.setData(d);
         end
 
-        function tapTxSuccess(srcIdx)
+        function tapTxSuccess(srcIdx, t)
             % Called once per generated message that reached at least one
             % destination (WSN_Main.m, after the per-destination delivery
             % loop). Kept separate from tapRx so broadcast messages with
@@ -116,6 +118,7 @@ classdef WSN_FeatureExport
             d = WSN_FeatureExport.getData();
             if isempty(d) || srcIdx < 1 || srcIdx > d.numNodes, return; end
             d.txDelivered(srcIdx) = d.txDelivered(srcIdx) + 1;
+            d.lastSuccessTxTick(srcIdx) = t;
             WSN_FeatureExport.setData(d);
         end
 
@@ -264,7 +267,14 @@ classdef WSN_FeatureExport
                     else
                         phaseHoldTime = 0;
                     end
+                elseif d.lastSuccessTxTick(idx) > 0
+                    % Sensor/CH proxy: ticks since last successful TX (no
+                    % token/phase backbone at these tiers). Documented
+                    % proxy, see FEATURE_MAPPING.md.
+                    phaseHoldTime = t - d.lastSuccessTxTick(idx);
                 end
+
+                energyConsumed = max(0, d.batteryAtWindowStart(idx) - n.battery);
 
                 queueDepth = 0;
                 if isprop(n, 'Q_fwd') && isprop(n, 'Q_local')
@@ -292,17 +302,20 @@ classdef WSN_FeatureExport
                 row = sprintf(['%d,%d,%d,%s,%d,' ...
                     '%g,%d,%g,%g,%g,%g,%g,%g,' ...
                     '%g,%g,%d,%g,%g,' ...
-                    '%d,%d,%g,%g,%d,%d,' ...
+                    '%d,%d,%g,%g,%g,%d,%d,' ...
                     '%g,%d,%d,%d,' ...
                     '%d,%s,%d'], ...
                     d.windowStart, t, idx, n.hexID, n.tier, ...
                     meanRSSI, lqi, snrDB, ber, per, n.txPower, txPowerControl, txGain, ...
                     pdr, latency, queueDepth, dutyCycle, phaseHoldTime, ...
-                    hopCount, numel(n.neighborTable), n.battery, chRatio, d.reElectionCount(idx), d.retransmitCount(idx), ...
+                    hopCount, numel(n.neighborTable), n.battery, energyConsumed, chRatio, d.reElectionCount(idx), d.retransmitCount(idx), ...
                     keyOverhead, d.rekeyCount(idx), d.intrusionCount(idx), d.packetInjectionCount(idx), ...
                     attackType, attackTypeName, isMal);
 
                 d.rows{end+1} = row;
+
+                % Carry this window's ending battery forward as next window's baseline
+                d.batteryAtWindowStart(idx) = n.battery;
             end
 
             % ---- reset per-window counters, keep cross-window state ----
@@ -356,7 +369,7 @@ classdef WSN_FeatureExport
             header = ['WindowStart,WindowEnd,NodeIdx,NodeHexID,Tier,' ...
                 'RSSI,LQI,SNR_dB,BER,PER,TxPower,TxPowerControl,TxGain,' ...
                 'PDR,Latency,QueueDepth,DutyCycle,PhaseHoldTime,' ...
-                'HopCount,NeighborCount,ResidualEnergy,CHRatio,ReElectionFreq,RetransmitCount,' ...
+                'HopCount,NeighborCount,ResidualEnergy,EnergyConsumed,CHRatio,ReElectionFreq,RetransmitCount,' ...
                 'KeyOverhead,RekeyFreq,IntrusionRate,PacketInjectionCount,' ...
                 'AttackType,AttackTypeName,IsMalicious'];
             fprintf(fid, '%s\n', header);

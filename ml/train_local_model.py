@@ -85,16 +85,17 @@ def build_features(df):
         raise ValueError(f"local_dataset.csv is missing expected columns: {missing}")
     X = df[LOCAL_TIER_FEATURES].copy()
 
-    # KNOWN DATA GAP: PhaseHoldTime is NaN for 100% of Sensor/CH-tier rows in
-    # the current dataset (only populated for GWN-tier rows) -- a
-    # WSN_FeatureExport.m tap-site bug, not an ML issue. Per user decision the
-    # dataset isn't being regenerated right now, so impute with an explicit
-    # sentinel (distinguishable from any real value) rather than silently
-    # dropping the column, since it's one of the paper's defined 6 local-tier
-    # features and SMOTE/sklearn can't train on raw NaN anyway.
+    # PhaseHoldTime is now populated for Sensor/CH tiers too (ticks-since-
+    # last-successful-TX proxy, see IDS_METRICS_IMPROVEMENT_PLAN.md and
+    # DATASET_GENERATION.md) -- previously this was NaN for 100% of
+    # Sensor/CH rows (WSN_FeatureExport.m tap-site gap, fixed). It can still
+    # be NaN for a node that never had a successful TX all simulation (rare),
+    # so keep an explicit sentinel impute rather than dropping the column,
+    # since it's one of the paper's defined 6 local-tier features and
+    # SMOTE/sklearn can't train on raw NaN anyway.
     if X["PhaseHoldTime"].isna().any():
         print(f"  [WARN] PhaseHoldTime is NaN for {X['PhaseHoldTime'].isna().mean():.1%} of rows "
-              f"(known WSN_FeatureExport.m tap-site gap, see AI_ENGINE_DEBUG_PROMPT.md) -- imputing with -1 sentinel")
+              f"(no successful TX yet for these nodes) -- imputing with -1 sentinel")
         X["PhaseHoldTime"] = X["PhaseHoldTime"].fillna(-1)
 
     y = df["IsMalicious"].map({0: "Normal", 1: "Attack"})

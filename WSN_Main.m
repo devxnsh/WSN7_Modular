@@ -413,7 +413,7 @@ try
                 end
             end
             if anyDelivered
-                WSN_FeatureExport.tapTxSuccess(srcIdx);
+                WSN_FeatureExport.tapTxSuccess(srcIdx, t);
             end
         end
         % --- D2. RADIO STEP & PROTOCOL DELIVERY ---
