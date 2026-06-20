@@ -42,9 +42,9 @@ flowchart TD
     A[WSN_TopologyGenerator] --> B[WSN_Main]
     C[WSN_Attack] --> B
     B --> D[WSN_Physics.updateConnectivity]
-    B --> E[Node step()]
+    B --> E[Node step]
     E --> F[WSN_Radio / WSN_Gateway dual radios]
-    F --> G[Node receive()]
+    F --> G[Node receive]
     G --> H[Protocol handlers / registries]
     H --> I[GUI + logs + sink analytics]
     B --> I

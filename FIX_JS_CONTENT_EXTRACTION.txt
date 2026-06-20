@@ -1,0 +1,590 @@
+CHAPTER 2: LITERATURE REVIEW - CONTENT POINTS EXTRACTED
+
+================================================================================
+CHAPTER INTRODUCTION
+================================================================================
+
+This chapter surveys the foundational body of knowledge underlying the proposed 
+secure, machine-learning-enforced architecture for Wireless Sensor Networks. The 
+review is organized thematically across the structural and adversarial dimensions 
+of WSN design. It opens with an overview of WSN fundamentals, canonical application 
+domains, and the principal classes of vulnerability that motivate the proposed 
+framework. Subsequent sections address the backhaul architectures that constitute 
+the communications substrate, encryption standards viable within the low-power 
+constraints of sensor hardware, dual-radio architectural patterns that resolve the 
+range-versus-power trade-off, and the application of machine learning to attack 
+detection and mitigation.
+
+================================================================================
+BASICS OF WIRELESS SENSOR NETWORKS
+================================================================================
+
+FUNDAMENTAL DEFINITION AND STANDARDS:
+- A Wireless Sensor Network (WSN) is a spatially distributed collection of 
+  autonomous devices, each equipped at minimum with:
+  * Sensing transducer
+  * Microcontroller
+  * Wireless radio
+  * Power source
+- Each node converts a physical-world observable (temperature, pressure, motion, 
+  ambient light) into a digital measurement and communicates it toward a sink
+- IEEE 802.15.4 is the operating standard for low-power, short-range WSN 
+  communication
+- IEEE 802.15.4 specifies Physical and MAC layers across 27 ISM-band channels:
+  * 868 MHz
+  * 915 MHz
+  * 2.4 GHz
+- ZigBee is the application-layer stack built on IEEE 802.15.4
+  * Provides AES-128 link encryption
+  * Supports star, tree, and mesh topologies
+
+SENSOR NODE ARCHITECTURE:
+- Reflects deliberate minimalism:
+  * Small microcontroller handles sensing and control logic
+  * Transceiver manages radio communication
+  * Power management subsystem extends battery life through aggressive sleep 
+    scheduling
+  * Optional flash memory enables local data buffering
+- Hard constraints on all aspects of software design:
+  * Models must be compact
+  * Cryptographic overhead must be bounded
+  * Communications must be infrequent
+- Large-scale deployments organize flat topology into hierarchical structure:
+  * Cluster Heads (CHs)
+  * Gateway Nodes (GWNs)
+  * These aggregate, encrypt, and relay sensor readings upstream toward sink
+
+WSN APPLICATION DOMAINS:
+- Environmental Monitoring:
+  * Air quality
+  * Water quality
+  * Wildfire detection
+  * Seismic activity
+  * Instruments large, otherwise inaccessible terrain
+
+- Agricultural Deployments:
+  * Precision irrigation
+  * Soil condition monitoring
+  * Crop health surveillance
+
+- Industrial Applications:
+  * Structural health monitoring (bridges, pipelines)
+  * Predictive maintenance in manufacturing
+  * Supply-chain asset tracking
+
+- Healthcare Applications:
+  * Patient monitoring in hospital wards
+  * Wearable physiological sensors
+  * Smart-home monitoring for elderly populations
+
+- Defense and Border-Surveillance (High Criticality):
+  * Perimeter monitoring
+  * Battlefield sensor grids
+  * Aerospace ground-support infrastructure
+  * Network compromise carries consequences far beyond data loss
+
+STRUCTURAL VULNERABILITIES OF WSNs:
+- Broadcast nature of RF medium exposes every transmission to passive interception
+- Nodes physically deployed in uncontrolled or hostile environments make hardware 
+  capture trivially executable by adequately resourced adversaries
+- Energy and memory budgets preclude classical cryptographic mechanisms:
+  * Full PKI handshakes impractical
+  * Frequent re-keying impractical
+  * Computationally intensive authentication schemes impractical
+- MAC-layer protocols using token passing or duty cycling introduce predictable 
+  timing patterns exploitable by adversaries
+- Centralized anomaly detection cannot respond within temporal bounds of 
+  fast-evolving attacks:
+  * Flooding
+  * Coordinated sinkhole formation
+
+ATTACK CLASSIFICATION - DESTRUCTIVE VS. EXTRACTIVE:
+
+DESTRUCTIVE ATTACKS (Degrade or eliminate network functionality):
+- Flooding:
+  * Saturates neighboring radios with excessive packets
+  * Causes collisions
+  * Accelerates battery drain on surrounding nodes
+
+- Blackhole:
+  * Silently discards all packets routed through it
+  * Leaves no statistical trail
+
+- Grayhole:
+  * Selectively drops configurable fraction based on implied packet priority
+  * Statistically harder to distinguish from legitimate channel loss
+
+- Sinkhole:
+  * Advertises falsely strong routes
+  * Attracts then discards upstream traffic
+  * Corrupts routing topology
+
+- Denial-of-Sleep:
+  * Exploits knowledge of node duty cycles
+  * Injects wakeup messages immediately before node enters sleep state
+  * Drains battery reserves without causing immediately visible disruption
+
+- Wormhole:
+  * Tunnels packets between distant network regions through private out-of-band 
+    channel
+  * Creates phantom links
+  * Distorts topological map maintained by network
+
+EXTRACTIVE ATTACKS (Operate without disrupting normal data flow):
+- Eavesdropping:
+  * Intercepts packets
+  * Duplicates packets
+  * Silently reroutes received packets to unintended destinations
+
+- Sybil:
+  * Fabricates multiple virtual identities
+  * Poisons neighbor tables
+  * Subverts routing and cluster-formation decisions
+
+- Man-in-the-Middle:
+  * Passive interception variant
+
+ATTACK DEPLOYMENT CHARACTERISTICS:
+- Attacks may be deployed in combination
+- Attacks operate at varying intensities
+- Attacks exhibit varying detectability
+- Most dangerous variant: activity statistically indistinguishable from stochastic 
+  channel variation
+
+================================================================================
+BACKHAUL ARCHITECTURES
+================================================================================
+
+DEFINITION AND ROLE:
+- Backhaul refers to communication substrate carrying aggregated data from 
+  cluster-level collection points upstream toward sink
+- Fundamentally governs:
+  * Latency
+  * Reliability
+  * Energy consumption
+  * Adversarial resilience of entire network
+
+SINGLE-RADIO BACKHAUL APPROACH:
+- In low-risk, short-range deployments, backhaul often implemented on same 
+  IEEE 802.15.4 radio used for intra-cluster access
+- Single-radio approach creates problems:
+  * Conflates two traffic classes with distinct requirements:
+    - Short-range, high-frequency sensor reporting
+    - Long-distance, aggregated data forwarding
+  * Contention between classes degrades performance of both
+  * Compromised access-tier node can directly affect backbone traffic
+
+IEEE 802.15.4 AND ZIGBEE LIMITATIONS:
+- Dominant short-range WSN substrate
+- Supports mesh routing and AES-128 link-layer encryption
+- Provides three-device model: Coordinators, Routers, End Devices
+- Limitations:
+  * Static cluster formation
+  * Limited heterogeneous interoperability
+  * Exposes to topology disruption attacks in dense/adversarially contested 
+    environments
+  * Absence of distinct backhaul channel means flooding/Sinkhole against Router 
+    degrades both access and backbone simultaneously
+
+LORA AND LORAWAN LIMITATIONS:
+- Extends communication range to several kilometers
+- Provides physically distinct long-range channel suitable for backbone
+- Critical limitation: Strict duty-cycle constraints
+  * As low as 1% in some regulatory regions
+  * Prevents application to real-time, event-driven WSN scenarios
+- Trade-off: Cannot resolve range-versus-duty-cycle within single-radio 
+  architecture
+
+HETEROGENEOUS DUAL-RADIO RESOLUTION:
+- Addresses fundamental range/duty-cycle trade-off
+- Gateway-tier nodes equipped with two independent transceivers operating on 
+  distinct frequency bands
+- One radio (short-range):
+  * Typical: IEEE 802.15.4 or BLE interface
+  * Handles intra-cluster traffic
+- Second radio (long-range):
+  * Most common: LoRa or LoRaWAN module
+  * Manages backbone communication between cluster heads and sink
+- Demonstrated success (Ayele et al.):
+  * BLE and LoRa pairing for wildlife monitoring
+  * Meets both short-range high-frequency requirements and long-distance 
+    forwarding requirements
+  * No duty-cycle violations with independent MAC layers
+  * Each radio's MAC optimized independently
+- Eliminates cross-tier interference
+- Allows independent MAC optimization
+
+BACKHAUL ROUTING AND MAC PROTOCOLS:
+
+Token-Passing MAC:
+- Example: Multi-Token MAC-cum-Routing Protocol
+- Benefits:
+  * Eliminates MAC-layer flooding and collision attacks
+  * Grants transmission rights exclusively to valid token holder
+  * Collision-free parallel transmissions from immediate parent nodes
+- Vulnerabilities:
+  * Replay attacks
+  * Token theft
+  * Compromised node retains/duplicates token to starve legitimate nodes
+
+Hierarchical Routing:
+- Example: LEACH (Low-Energy Adaptive Clustering Hierarchy)
+- Introduced probabilistic cluster-head rotation to balance energy load
+- Issues:
+  * Random election produces topologically suboptimal clusters
+  * Vulnerable to CH-impersonation attacks
+
+Proposed Alternating Tx-Rx Chain:
+- Uses local key's final bit to calculate gateway node's transmission phase
+- Creates alternating Tx-Rx chain across gateway nodes
+- Benefits:
+  * Resolves backpressure naturally without explicit token management
+  * Eliminates replay vulnerabilities of token-based schemes
+
+================================================================================
+ENCRYPTION IN WSN
+================================================================================
+
+CRYPTOGRAPHY'S ROLE AND CHALLENGE:
+- Primary tool for ensuring data:
+  * Confidentiality
+  * Integrity
+  * Authenticity
+- Challenge: Classical cryptographic primitives impose energy and computational 
+  costs that scale poorly with resource constraints
+- Public-Key Infrastructure (PKI) handshakes unworkable at leaf-node level:
+  * Require modular exponentiation or elliptic-curve point multiplication
+  * Energy cost can exceed that of transmitting hundreds of data packets
+- Tension: Not whether to use cryptography, but how to select, layer, and 
+  distribute cryptographic responsibilities across tiers with radically different 
+  resource profiles
+
+SYMMETRIC KEY CRYPTOGRAPHY AT SENSOR LEVEL:
+- Primary viable option at sensor level
+- AES-128:
+  * Adopted by IEEE 802.15.4 for link-layer encryption
+  * Provides 128-bit block cipher
+  * Key schedule computational cost well within reach of modern low-power 
+    microcontrollers (16–32 MHz)
+- Lightweight block ciphers (HIGHT):
+  * Operates on 64-bit block with 128-bit key using GFS (Generalized Feistel 
+    Structure)
+  * Proposed specifically for resource-constrained embedded environments
+  * Achieves substantially lower energy consumption per encryption operation than 
+    AES-128
+  * Maintains adequate security margins against known attacks
+- Trade-off consensus: AES-128 represents acceptable balance for most deployment 
+  scenarios, particularly with hardware-accelerated AES engines
+
+KEY MANAGEMENT:
+- Challenge: If single global network key distributed to all nodes, compromise 
+  of any single node exposes entire network's traffic to decryption
+- Hierarchical Key Management:
+  * Pre-distribute tier-specific pairwise keys
+  * Delete global network key from nodes after initialization
+  * Localizes impact of single-node compromise to cluster where node resides
+  * Example: EAHKM+ scheme with hierarchically partitioned pairwise keys and 
+    rekeying mechanism operating without global keying material re-distribution
+- ID-based Aggregate Signature Schemes:
+  * Reduce bandwidth cost of per-node authentication
+  * Allow cluster heads to aggregate signatures from multiple child nodes into 
+    single compact message before forwarding
+
+PROPOSED LAYERED KEY STRUCTURE:
+- Global key:
+  * Held only by sink
+  * Distributed through structured five-step locking handshake during network 
+    setup
+- Gateway nodes:
+  * Derive local keys from global key
+- Cluster heads:
+  * Receive only local key of their parent gateway node
+- Leaf sensor nodes:
+  * Operate without cryptographic key material
+  * Transmit plaintext to cluster head
+  * Cluster head encrypts using both local and global keys before forwarding
+- Dual-encryption benefit: Confines any breach to single cluster for any single 
+  compromised node
+- Local key final bit repurposing:
+  * Encodes node's transmission phase in alternating Tx-Rx chain
+  * Eliminates need for separate scheduling broadcast
+  * Makes backhaul phase schedule cryptographically bound to key distribution
+- Key validation:
+  * Failures at any tier immediately visible as trust score events
+  * Trigger daisy-chained polling mechanism
+
+================================================================================
+DUAL-RADIO ARCHITECTURES
+================================================================================
+
+FUNDAMENTAL DESIGN TRADE-OFF:
+- Single-radio WSN architectures face fundamental trade-off:
+  * Properties enabling long-range communication (higher transmit power, lower 
+    data rates) in direct tension with:
+  * Energy efficiency required for intra-cluster, high-frequency sensor reporting
+- Long-range optimization incurs prohibitive energy expenditure or unacceptable 
+  duty-cycle constraints
+- Dual-radio resolution:
+  * Equip gateway-tier or cluster-head-tier nodes with two independent 
+    transceivers
+  * Each selected and configured for specific traffic class
+  * Decouple MAC layers entirely
+  * Contention in one channel does not degrade other
+
+EXTENSIVELY STUDIED RADIO PAIRINGS:
+
+BLE/IEEE 802.15.4 + LoRa/LoRaWAN:
+- Short-range: BLE or IEEE 802.15.4 for intra-cluster access
+- Long-range: LoRa or LoRaWAN for backbone forwarding
+- Example: Ayele et al. wildlife monitoring
+  * BLE for data collection from nearby sensors
+  * LoRa for forwarding aggregated records to distant base station
+  * Two radios operate concurrently without mutual interference
+  * LoRa duty-cycle constraint did not degrade access-tier performance
+  * MAC layers entirely independent
+- Patent reference: US10582358B1 describes wireless coded communication (WCC) 
+  device architecture with dual-radio functions for heterogeneous backhaul and 
+  access traffic
+
+HETEROGENEOUS WSN STUDY (Liu et al.):
+- ZigBee–LoRa hybrid communication system
+- Combined:
+  * Two ZigBee sensor clusters
+  * Two LoRa sensor clusters
+  * Through ZigBee-to-LoRa converter nodes managed by central LoRa gateway
+- Token ring protocol governed ZigBee cluster access
+- Polling mechanism applied to LoRa backbone
+- Results:
+  * Packet loss rates below 1%
+  * Communication ranges exceeding 3.7 km on backbone channel
+  * Performance unattainable with any single-radio protocol within ISM-band 
+    regulatory constraints
+- Demonstrates:
+  * Hybrid MAC architectures feasible
+  * Two traffic classes can be served simultaneously with distinct MAC protocols
+  * No mutual degradation
+  * Central design principle of proposed framework's gateway-node architecture
+
+GATEWAY NODE HARDWARE CONSTRAINTS:
+- Substantially more demanding than leaf-node constraints
+- Direct consequence of dual-radio requirement
+- Demands:
+  * Manage two independent radio stacks
+  * Run both access and backbone MAC protocols concurrently
+  * Perform cryptographic operations on upstream data
+  * Execute real-time machine learning inference
+  * All within power budget supplemented by energy harvesting
+- Must sustain for unattended operational lifetime
+- Hardware mandates:
+  * Processing or co-processing architecture capable of preemptive multithreading 
+    via RTOS
+  * Microcontroller with hardware-accelerated AES support
+  * Large-capacity battery supplemented by photovoltaic or energy-harvesting 
+    circuit
+  * Dual-radio modules with high-gain external antennas for backbone link
+- Leaf nodes (majority of deployment):
+  * No such specialization required
+  * Any commercial low-power microcontroller with adequate sleep-scheduling 
+    control and memory for compressed local trust model suffices
+
+================================================================================
+MACHINE LEARNING FOR ATTACK DETECTION AND PREVENTION
+================================================================================
+
+ML NECESSITY FOR WSN INTRUSION DETECTION:
+- Rule-based systems and threshold monitors cannot adapt to:
+  * Stochastic variation of attack intensities
+  * Gradual drift of node behavior over time
+  * Combinatorial diversity of multi-attack scenarios
+- WSN attack behavioral signatures manifest across multiple protocol layers:
+  * Flooding: Elevates MAC-layer queue depth, increases retransmissions, drains 
+    neighboring node batteries
+  * Sinkhole: Suppresses CH re-election frequency, distorts perceived hop-count 
+    distances
+  * Denial-of-Sleep: Produces residual energy asymmetry inconsistent with node's 
+    reported duty cycle
+- Multi-layer, correlated signatures are precisely what supervised classifiers 
+  excel at learning
+- Requires sufficiently rich feature vector from labeled historical data
+
+MULTI-LAYER FEATURE SET FOR ATTACK CLASSIFICATION:
+
+Physical Layer Parameters:
+- Received signal strength (RSSI)
+- Link quality indicator (LQI)
+- Signal-to-noise ratio (SNR)
+- Bit error rate (BER)
+- Packet error rate (PER)
+- Characterize channel fidelity and signal degradation
+
+MAC Layer Parameters:
+- Packet delivery ratio (PDR)
+- End-to-end latency
+- Queue depth
+- Duty cycle
+- Token holding time
+- Expose medium-access efficiency anomalies
+
+Network Layer Parameters:
+- Hop count
+- Neighbor count
+- Residual energy
+- CH re-election frequency
+- Retransmission counts
+- Indicate topological health and energy depletion patterns
+
+Security Layer Parameters:
+- Key overhead
+- Rekeying frequency
+- Intrusion event rate
+- Packet injection count
+- Quantify adversarial interaction and network stress
+
+ATTACK SIGNATURE MAPPING:
+- RSSI drops: Indicate jamming
+- Anomalous token holding time: Exposes Blackhole nodes
+- CH re-election spikes: Characteristic of Sinkhole attacks advertising false 
+  routes
+- Residual energy asymmetry across nodes: Fingerprint of Denial-of-Sleep 
+  exploitation
+
+EMBEDDED ML PRACTICAL CONSTRAINT:
+- Full 23-feature vector infeasible for real-time inference on leaf-tier 
+  microcontrollers
+- Operating at 16–32 MHz with kilobyte-scale RAM
+- Solution: Compressed feature subset
+  * Captures both channel state and behavioral anomaly
+  * Negligible runtime overhead
+  * Maximizes discriminative power per computation cycle
+
+LEAF-TIER FEATURE SUBSET:
+- Compressed features for constrained devices:
+  * RSSI
+  * PDR
+  * Retransmission count
+  * Residual energy
+  * Token holding time
+  * Queue depth
+- Approximates classification performance of full-feature model on dominant 
+  attack classes
+- Fits within memory and compute constraints of typical ARM Cortex-M0 or M4 
+  devices
+
+EMBEDDED ML OPTIMIZATION TECHNIQUES:
+- Network pruning
+- Fixed-point quantization
+- Decision tree compression
+- Reduce memory footprint of inference model
+- Achieve compatibility with 2–32 KB SRAM available on representative leaf-node 
+  MCUs
+
+SINK-LEVEL INFERENCE TIER:
+- Compute constraint lifted at global sink-level
+- Richer models become appropriate
+- Evaluated on Kasasbeh WSN-DS dataset
+- Dataset logs 23 per-node operational parameters across five behavioral classes:
+  * Normal
+  * Blackhole
+  * Grayhole
+  * Flooding
+  * Scheduling Attack
+
+MODEL PERFORMANCE:
+
+Decision Tree Classifier (DTC):
+- Overall accuracy: 99.48%
+
+Random Forest Classifier (RFC):
+- Overall accuracy: 99.68%
+
+RFC Selected Because:
+- Ensemble of 100 trees eliminates instability of individual trees
+- Particularly important under severe class imbalance in dataset
+  * Normal traffic exceeded 90% of samples
+  * Flooding minority ratio exceeded 100:1
+- Internal feature importance scores provide interpretable audit trail unavailable 
+  from single-tree classifiers
+
+RFC FEATURE IMPORTANCE ANALYSIS:
+- ADV_S (advertisement send count): 18.3% (dominant discriminator)
+- Expended Energy: 14.8%
+- Is_CH flag: 12.9%
+- Data_Sent_To_BS: 10.2%
+- SCH_S: 8.0%
+- Confirms attack classes most distinguishable at control-plane level
+- Not through raw data throughput
+
+RFC PER-CLASS ACCURACY:
+- Blackhole: 99.4%
+- Flooding: 98.1%
+- Grayhole: 98.7%
+- Normal: 99.9%
+- Scheduling: 93.6%
+
+DUAL-INFERENCE STRATEGY:
+- Lightweight local model at node level
+- Comprehensive global model at sink
+- Addresses temporal limitations of centralized detection
+- Retains statistical power of global network visibility
+
+LOCAL MODEL FUNCTION:
+- Provides rapid anomaly flagging within communication round during which attack 
+  occurs
+- Enables daisy-chained polling mechanism
+- Isolates and resets suspect nodes before significant data loss accumulates
+
+GLOBAL MODEL FUNCTION:
+- Continuously updated and recalibrated by sink
+- Addresses long-term drift afflicting static embedded classifier
+- Network's normal operating statistics evolve over time with:
+  * Node aging
+  * Environmental change
+  * Topology adaptation
+
+CONTINUOUS RECALIBRATION LOOP:
+- Global model pushes updated local decision boundaries to constrained nodes over 
+  backbone channel
+- Critical differentiator from prior work deploying static, training-time-frozen 
+  models at edge
+- Prior work offers no mechanism for in-service adaptation
+
+================================================================================
+CHAPTER SUMMARY
+================================================================================
+
+CONTEXT ESTABLISHED:
+- Technical and adversarial context of proposed architecture
+
+WSN DESIGN FUNDAMENTALS REVEAL:
+- Structural constraints define threat surface:
+  * Broadcast RF medium
+  * Uncontrolled physical deployment
+  * Energy and memory scarcity
+
+ATTACK CLASS SURVEY IDENTIFIES:
+- Specific behavioral signatures ML models must learn to distinguish
+
+BACKHAUL ARCHITECTURES REVIEW DEMONSTRATES:
+- Dual-radio, hierarchically tiered approach necessary
+- Decouples access and backbone traffic
+- Eliminates cross-tier interference
+
+ENCRYPTION STANDARDS REVIEW ESTABLISHES:
+- Hierarchical key management with lightweight symmetric ciphers
+- Only cryptographically sound and practically feasible approach at sensor tier
+
+DUAL-RADIO ARCHITECTURAL PATTERNS CONFIRM:
+- Viability of BLE/IEEE 802.15.4 and LoRa pairings
+- Simultaneous access and backbone service possible
+
+MACHINE LEARNING FOR ATTACK DETECTION ESTABLISHES:
+- Tiered inference architecture both necessary and achievable:
+  * Lightweight compressed models at constrained nodes
+  * Full Random Forest ensembles at sink
+  * Continuous recalibration
+  * Within hardware constraints of deployable WSN hardware
+
+INTEGRATION:
+- Proposed architecture integrates all strands into coherent, self-reconfigurable 
+  framework
+- Design detailed in subsequent chapter

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WSN7 Attack Modus Operandi Flowchart</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            font-size: 14px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .mermaid {
+            display: flex;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WSN7 Attack Modus Operandi Flowchart</h1>
+        <div class="controls">
+            <button onclick="downloadSVG()">Download as SVG</button>
+            <button onclick="downloadPNG()">Download as PNG</button>
+        </div>
+        <div class="mermaid">
+%%{init: {'flowchart': {'htmlLabels': true}, 'themeVariables': {'fontSize': '40px', 'fontFamily': 'arial'}}}%%
+graph TD
+    START["Attacker Node Activated<br/>(GWN, CH, or Sensor)"] --> ASSESS["Assess Network State<br/>Topology, Trust Level, Resources"]
+    
+    ASSESS --> OBJECTIVE{"Attack Objective?"}
+    
+    OBJECTIVE -->|Disrupt Discovery| HELLO["<b>HELLO_FLOOD</b><br/>Burst HELLO messages<br/>Inflate neighbor counts<br/>Collapse topology"]
+    OBJECTIVE -->|Emergency Exploitation| PANIC["<b>PANIC_FLOOD</b><br/>Broadcast false emergencies<br/>Type 2 + high priority<br/>Force response overhead"]
+    OBJECTIVE -->|Silent Data Loss| BLACKHOLE["<b>BLACKHOLE</b><br/>Drop all packets silently<br/>Log RX, suppress FWD<br/>Appear operational"]
+    OBJECTIVE -->|Path Manipulation| WORMHOLE["<b>WORMHOLE</b><br/>Advertise false low-latency<br/>Re-route traffic through<br/>attacker-controlled path"]
+    OBJECTIVE -->|Battery Exhaustion| DOS["<b>DENIAL OF SLEEP</b><br/>Send spurious Type 255<br/>Continuous TX/RX cycles<br/>Drain battery rapidly"]
+    OBJECTIVE -->|Influence Amplification| SYBIL["<b>SYBIL</b><br/>Spawn multiple identities<br/>Staggered HELLO broadcast<br/>Gain disproportionate voting"]
+    OBJECTIVE -->|Selective Disruption| GRAY["<b>GRAYHOLE</b><br/>Selective forwarding<br/>~50% drop rate by type<br/>Appear partially operational"]
+    
+    HELLO --> HELLO_EX["Intensity 1-3: Burst 20+ msgs/tick<br/>Intensity 4-7: Burst 5-10 msgs/tick<br/>Intensity 8-10: Burst 1-2 msgs/tick"]
+    PANIC --> PANIC_EX["Set Type 2, Priority MAX<br/>TTL = 3-5, Broadcast<br/>Repeat every 50-100 ticks"]
+    BLACKHOLE --> BH_EX["Drop rate = 10% × intensity<br/>Record RX, zero FWD<br/>Create ghost links visual"]
+    WORMHOLE --> WH_EX["Advertise RSSI -20 to both<br/>Intercept bidirectional packets<br/>Re-encode with false delay"]
+    DOS --> DOS_EX["Inject Type 255 spurious<br/>Wake target every 2-5 ticks<br/>Force response ACK cycles"]
+    SYBIL --> SYBIL_EX["Create 2-5 fake identities<br/>Rotate HELLO every 10 ticks<br/>Register all as neighbors"]
+    GRAY --> GRAY_EX["Drop ~50% of Type 1 (data)<br/>Forward Type 3,7,8,9<br/>Create asymmetric pattern"]
+    
+    HELLO_EX -->|Sink/Neighbors: Topology instability,<br/>neighbor count spike, HELLO rate anomaly| DETECT["Detection Initiated"]
+    PANIC_EX -->|Sink/Neighbors: Emergency source not GWN,<br/>false alert rate > threshold, trust degradation| DETECT
+    BH_EX -->|Neighbors: Zero forwarding observed,<br/>end-to-end delivery loss, missing ACKs| DETECT
+    WH_EX -->|Sink: Unusual path lengths,<br/>bidirectional timing asymmetry, anomalous RTT| DETECT
+    DOS_EX -->|Neighbors: Target continuous RX/TX,<br/>no sleep cycles, battery drain anomaly| DETECT
+    SYBIL_EX -->|Neighbors: Multiple IDs same location,<br/>identical packet signatures, correlated voting| DETECT
+    GRAY_EX -->|Neighbors: Type 1 data loss > 20%,<br/>control frames pass, asymmetric loss pattern| DETECT
+    
+    style START fill:#e1f5ff
+    style HELLO fill:#ffccbc
+    style PANIC fill:#ffccbc
+    style BLACKHOLE fill:#ffccbc
+    style WORMHOLE fill:#ffccbc
+    style DOS fill:#ffccbc
+    style SYBIL fill:#ffccbc
+    style GRAY fill:#ffccbc
+    style DETECT fill:#fff9c4
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+        mermaid.contentLoaded();
+
+        function downloadSVG() {
+            const svg = document.querySelector('.mermaid svg');
+            if (!svg) {
+                alert('Flowchart not yet rendered. Please wait a moment and try again.');
+                return;
+            }
+            const svgData = new XMLSerializer().serializeToString(svg);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            const blob = new Blob([svgData], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'WSN_Attack_Flowchart.svg';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadPNG() {
+            const mermaidDiv = document.querySelector('.mermaid');
+            if (!mermaidDiv || !mermaidDiv.querySelector('svg')) {
+                alert('Flowchart not yet rendered. Please wait a moment and try again.');
+                return;
+            }
+            html2canvas(mermaidDiv, {
+                backgroundColor: '#ffffff',
+                scale: 2,
+                logging: false
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.href = canvas.toDataURL('image/png');
+                link.download = 'WSN_Attack_Flowchart.png';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }).catch(err => {
+                alert('Error generating PNG: ' + err.message);
+            });
+        }
+    </script>
+</body>
+</html>
