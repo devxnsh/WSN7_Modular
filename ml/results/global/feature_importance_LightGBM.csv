@@ -1,0 +1,16 @@
+Feature,Importance
+ReportedRSSI,15925
+ReportingGap,10624
+CHRatio,9705
+ActiveSensorsRatio,8516
+TrustScore,5263
+ReportsReceived,4386
+SelfReportedBattery,3947
+RerouteCount,731
+NodeType_SENSOR,0
+NodeType_GWN,0
+NodeType_CH,0
+AnomalyCount,0
+HopCount,0
+RekeyEvent,0
+ExpectedReportRatio,0

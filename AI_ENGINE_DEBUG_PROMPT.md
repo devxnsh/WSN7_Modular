@@ -578,3 +578,384 @@ Notes & next steps:
 - The trust model, Hello-based sleep scheduling hints, and any formal security policy for panic handling are documented as design notes and remain to be implemented.
 - Recommend running a short topology + smoke simulation (low node count) to visually validate CH placement, sensor clustering, orphan behavior, and panic floods.
 
+---
+
+## ML-IDS Phase 1-4 Updates (2026-06-18 / 2026-06-19)
+
+Everything below was implemented in a separate, much larger workstream (`ML_IDS_PLAN.md`):
+a dual-tier ML/trust framework layered on top of the architecture above. This section was
+missing from this document; it summarizes Phase 1-4 plus three bugs found and fixed during
+Phase 4 verification that were not part of the original plan.
+
+### Phase 1-2: Feature export pipeline (new modules, no protocol changes)
+
+- **`WSN_FeatureExport.m`** (new) — static/persistent-store class, tap-based. Records
+  per-node-per-window local telemetry (RSSI, PDR, RetransmitCount, ResidualEnergy,
+  PhaseHoldTime, QueueDepth, derived LQI/SNR/BER/PER, etc.) via `tap*()` calls added at
+  existing event sites in `WSN_Main.m` (tick loop, TX/RX boundaries) and
+  `WSN_Gateway_Behavior.m` (retry sites). `flushWindow()` every `WSN_Config.FEATURE_WINDOW_LEN`
+  (=50) ticks, `exportCSV()` at end of run → `logs/local_features_*.csv`.
+- **`WSN_SinkFeatureExport.m`** (new) — same pattern, but reads only from `WSN_Sink.m`'s own
+  registries (`sensorRegistry`, `nodeRegistry`, `globalTrustRegistry`) — i.e. only what the
+  Sink could actually observe, including attack-induced gaps/silences. → `logs/sink_features_*.csv`.
+- `WSN_Config.m`: added `FEATURE_WINDOW_LEN = 50`.
+- `WSN_Main.m`: wired `WSN_FeatureExport.init/tapTick/tapTx/tapRx/tapTxSuccess`, window-flush
+  on the `mod(t, FEATURE_WINDOW_LEN)==0` tick, and end-of-run CSV export for both modules.
+
+### Phase 3: Dataset generation driver
+
+- **`WSN_Attack_Demo.m`** (was a 3-byte empty file) — now a headless batch driver. For each
+  `(attackType, intensity)` scenario it generates a fresh topology, sets one malicious node
+  active from `t=warmup`, runs `WSN_Main(1e9, ..., nodes, duration)` fully headless, and
+  concatenates the per-scenario feature CSVs into `logs/local_dataset.csv` /
+  `logs/sink_dataset.csv`. Default grid: 1 Normal baseline + 7 attack types × 3 intensities.
+  See `DATASET_GENERATION.md` for full usage. **Already run once** — both dataset CSVs exist
+  in `logs/` (~27MB each, ~180k/~246k rows) and are treated as a checkpoint, not regenerated
+  for the Phase 4 fixes below (see caveat in that doc about the two `CHRatio`/`ActiveSensorsRatio`
+  columns reflecting the pre-ratio-fix topology distribution).
+
+### Phase 4: Census/Shutdown/Update protocol (rule-based local-tier mitigation)
+
+New message types 11 (Census)/12 (Shutdown)/13 (Update, constants only — no live sender yet)
+and trust-threshold constants in `WSN_Config.m`. Daisy-chain trust polling
+(`checkCensusTriggers`/`handleCensusMessage`, mirrored independently in `WSN_Sensor.m`,
+`WSN_ClusterHead.m`, `WSN_Gateway.m`) with nearest-ancestor enforcement escalation
+(`handlePollComplete`: SOFT_RESET → HARD_RESET → BLACKLIST via `resetHistory`). `isBlacklisted`
+flag added to `WSN_Node.m` as a universal `receive()`/`step()` short-circuit. Full protocol
+spec, message format, and worked trace in `CENSUS_PROTOCOL.md`.
+
+### Phase 4 verification: three bugs found and fixed (not in the original plan)
+
+Verifying Phase 4 against live simulation runs (not just code review) surfaced three real,
+independent problems, each of which was masking the others:
+
+1. **`neighborTable.TrustScore` field-reuse collision (fixed).** `WSN_Gateway.m`'s Census
+   trust code originally reused the pre-existing `neighborTable.TrustScore` field — but that
+   field already meant something else (Hello/Heartbeat *verification confidence*, set once at
+   neighbor-discovery via `trust = [10 30 60 100]` in `WSN_Gateway_Messaging.m`, indexed by
+   tier/subtype, never updated afterward). An unverified heartbeat (the common bootstrap case)
+   assigned `TrustScore=10` — already below `TRUST_CENSUS_TRIGGER=20` from the moment of
+   creation, regardless of actual behavior. This caused ~6500 false-positive `CENSUS_INITIATE`
+   events in a 1500-tick run, virtually all GWN-vs-GWN noise from t=2 onward. **Fix**: gave
+   `WSN_Gateway` its own dedicated `neighborTrust` struct array (mirroring `WSN_Sensor`/
+   `WSN_ClusterHead`'s existing pattern), seeded at `TRUST_INITIAL=50`, completely decoupled
+   from `neighborTable.TrustScore` (which keeps its original GUI-display meaning untouched).
+   Verified: false-positive volume dropped ~95% (6553 → 347 events) with no loss of real signal.
+
+2. **GWN:CH population ratio inverted (fixed).** `WSN_TopologyGenerator.m` generated *more*
+   GWNs (12-15% of N) than CHs (6-10% of N) — backwards from a normal hierarchy (many sensors
+   → fewer CHs → even fewer backbone/gateway nodes). With ~10 CHs spread across ~12 GWNs, no
+   GWN could structurally have more than 1-2 CH children, hard-capping the daisy-chain Census
+   voter pool at the GWN tier regardless of RF range (confirmed via direct distance
+   measurement: actual GWN-CH links averaged 17.2 units against a ~24-27 unit fade-affected
+   max range — physics was never the bottleneck). **Fix**: `targetGWNs` lowered to 10-13%,
+   `targetCHs` raised to 16-20% (first attempt cut GWN density too far to 6-9%, which thinned
+   GWN spatial coverage and pushed average link distance up to 22.6 units, tanking
+   connectivity — the final numbers keep GWN density close to original while still
+   guaranteeing CH > GWN in every draw). Verified: CH verification rate rose from 41% to 79%
+   in a baseline run.
+
+3. **Blackhole/Grayhole produces no ACK failure anywhere, so neither original trigger ever
+   catches it (fixed with a new detector).** Traced into `WSN_ClusterHead.m`'s
+   `handleSensorAgg` (the receive-side handler for incoming 5.2 AGG from a child) and found
+   the Blackhole/Grayhole branch **deliberately fake-ACKs** the child before silently dropping
+   the relay upward ("Log RX, send ACK (appears normal), but no forward"). This means a
+   misbehaving node's own children always see a normal-looking ACK — the *only* place the
+   attack is visible is the attacker's own parent, who simply stops receiving periodic 5.2
+   reports. Neither of Phase 4's two original triggers (CH's-own-agg-never-ACKed;
+   GWN/CH-handshake-retry-exhaustion) is a silence detector — both require an active send
+   attempt that the attacker explicitly avoids failing. **Fix**: new parent-side
+   reporting-silence detector. `WSN_Gateway.m` gained `chLastAggSeen` (per-CH-child last-AGG
+   timestamp, updated in `WSN_Gateway_Messaging.m`'s `handle_SENSOR_AGG` and seeded at
+   CH-join time) and `chAggSilenceFlagged` (one-shot debounce). `checkCensusTriggers` now
+   flags and trust-decrements any CH child silent for longer than
+   `AGG_PERIOD_MAX * WSN_Config.SILENCE_GRACE_MULTIPLIER` (= 10×3 = 30 ticks). Verified live:
+   the detector fires correctly with accurate gap/threshold values in every test run since
+   being added (5-14 `[SILENCE]` events per run depending on scenario).
+   **Not yet captured live**: a single fully-clean trace from "attacker injected" through
+   "SILENCE → CENSUS_INITIATE → quorum → ENFORCE → SHUTDOWN" in one run — repeated attempts
+   were blocked by an *unrelated* topology-formation variance issue (the randomly-selected CH
+   attacker sometimes never completes its own GWN handshake at all within the test window, so
+   the attack has no host to manifest from — confirmed via `isVerified=0`/`parent=[]` in
+   several runs). This is independent of the Census/silence code, which has been verified
+   mechanically correct via direct log inspection (real gap values being computed and compared
+   against the real threshold).
+
+New `WSN_Config.m` constant: `SILENCE_GRACE_MULTIPLIER = 3`.
+
+Affected files (Phase 4 + verification fixes):
+
+- `WSN_Config.m` — message types 11-13, trust thresholds, `FEATURE_WINDOW_LEN`,
+  `SILENCE_GRACE_MULTIPLIER`
+- `WSN_Node.m` — `isBlacklisted` universal gate
+- `WSN_Message.m` — Census payload getters/setters, generic Shutdown payload
+- `WSN_Sensor.m`, `WSN_ClusterHead.m`, `WSN_Gateway.m`, `WSN_Gateway_Messaging.m`,
+  `WSN_Gateway_Behavior.m`, `WSN_Sink.m` — Census/Shutdown dispatch, trust stores, silence
+  detector
+- `WSN_GUI_SinkAnalytics.m` — Trust column now shows `BLACKLISTED` for blacklisted nodes
+- `WSN_TopologyGenerator.m` — GWN:CH ratio fix
+- New: `WSN_FeatureExport.m`, `WSN_SinkFeatureExport.m`
+- `WSN_Attack_Demo.m` — dataset generation driver (was empty)
+- `CENSUS_PROTOCOL.md`, `DATASET_GENERATION.md`, `ML_IDS_PLAN.md` — reference docs
+
+### Phase 5: offline Python training scripts (complete, run against real data)
+
+New `WSN7_Modular/ml/` directory:
+
+- **`wsn_ids_common.py`** — shared helpers only (CSV loading, one-hot encoding, accuracy/F1/
+  confusion-matrix evaluation, CSV+PNG plot helpers). No model logic — the two scripts
+  intentionally use different models/feature sets per the plan's vantage-point split.
+- **`train_global_model.py`** — consumes `logs/sink_dataset.csv`. Drops dataset-generation
+  bookkeeping columns that would leak the label or aren't real inference-time signals
+  (`ScenarioID`, `RequestedAttackType`, `RequestedIntensity`, `AttackerNodeIdx`, `IsMalicious`,
+  etc.) and drops `RSSIQualityBucket` specifically — `WSN_SinkFeatureExport.m` buckets it into
+  ~250 near-continuous `GROUPnnn` categories (a feature-export bug, not a real coarse bucket
+  scheme); `ReportedRSSI` already carries the same signal as a clean numeric column, so
+  one-hot-encoding 250 categories would add dimensionality for no benefit. NaN rows (a node
+  the Sink never heard from that window) are imputed explicitly (0 for counts/ratios, -1
+  sentinel for battery/RSSI) rather than silently dropped, since absence is itself a signal.
+  Class-weighted Decision Tree + Random Forest, stratified 80/20 split.
+- **`train_local_model.py`** — consumes `logs/local_dataset.csv`, restricted to the literal
+  6-column local-tier subset (`RSSI, PDR, RetransmitCount, ResidualEnergy, PhaseHoldTime,
+  QueueDepth`). Deliberately shallow models (`max_depth=5`, RF capped at 20 trees).
+
+**Run against the real (already-generated, Phase-3) datasets — results are genuine, not a
+smoke test:**
+
+| | DecisionTree acc | RandomForest acc | Notes |
+|---|---|---|---|
+| Global (`sink_dataset.csv`, 245,893 rows, 15 features) | 99.80% | 99.84% | Per-class F1 ranges 0.27-0.99 across all 8 classes — real discriminative signal, not a degenerate all-Normal classifier. |
+| Local (`local_dataset.csv`, originally multi-class) | 25.91% | 36.05% | **Superseded** — redesigned as binary Attack-vs-Normal after paper verification (see "Phase 5 follow-up #2" below); multi-class accuracy numbers no longer apply. |
+
+Both scripts write `class_distribution.csv`, `confusion_matrix_*.{csv,png}`,
+`feature_importance_*.{csv,png}`, `accuracy_comparison.csv`, `per_class_f1.csv`, and
+`full_report.json` to `ml/results/global/` and `ml/results/local/` respectively.
+
+### Phase 5 follow-up (2026-06-19): tried resampling for class imbalance, reverted
+
+Given the 99.4-99.8% Normal-class imbalance (67-145 real rows per minority class), tried
+addressing it with `imbalanced-learn` (already installed): `wsn_ids_common.resample_training_data`
+undersamples Normal and SMOTE-oversamples minorities on the **training split only** (test split
+always stays at the real distribution for honest metrics). Tested empirically rather than assumed
+beneficial:
+
+| | macro-F1 (RandomForest), no resample | macro-F1, resampled (target=2000/class) |
+|---|---|---|
+| Global | **0.610** | 0.243 |
+| Local | **0.175** | 0.124 |
+
+**Resampling regressed both models** — first attempt (uncapped, fixed target=2000) was especially
+bad for the global model, since its minorities only have 53-80 real training rows; blowing that up
+to 2000 via SMOTE means >95% synthetic data, and undersampling Normal from ~196k down to 2000 throws
+away the real majority-class structure the model needs to draw a clean decision boundary. Added a
+`max_oversample_ratio` cap (default 10x each class's real count) to make the function more
+defensible, but the capped version was still worse than no resampling at all on this dataset's small
+absolute counts. **Conclusion: `class_weight='balanced'` alone already handles this dataset's
+imbalance better than resampling** — resampling only earns its cost once minority classes have
+enough real rows that synthetic interpolation isn't doing most of the work (revisit after Phase 6
+rebalancing increases minority row counts). The function is kept in `wsn_ids_common.py` as an opt-in
+`--resample` flag on both scripts (off by default) rather than deleted, since it may become useful
+later and is independently tested/working.
+
+**Found and fixed in the process**: `PhaseHoldTime` (one of the paper's official 6 local-tier
+features) is **NaN for 100% of Sensor/CH-tier rows** in `local_dataset.csv` and populated only for
+GWN-tier rows (89.1% NaN overall) — i.e. it's being tapped at the wrong tier in
+`WSN_FeatureExport.m`, backwards from the plan's intent ("proxy for Sensor/CH token-hold time").
+This is a dataset-generation-side bug, not an ML issue, and fixing the MATLAB tap site would require
+regenerating the dataset (out of scope per user decision to keep the existing dataset). Worked around
+in `train_local_model.py` with an explicit `-1` sentinel imputation (logged with a `[WARN]` at
+runtime) rather than silently relying on sklearn's implicit native-NaN tree support — verified this
+imputation alone is a small genuine improvement (macro-F1 0.1747→0.1764), not a regression, and is
+now the local-tier baseline. **The local model's overall weak performance is not explained by this
+bug alone**: even with PhaseHoldTime properly imputed, Blackhole/Grayhole/Wormhole F1 stay near zero
+-- the remaining 5 features genuinely have little discriminative power for those attack types at the
+local-tier vantage point (see the standalone-tier-comparison discussion above).
+
+### Phase 5 follow-up #2 (2026-06-19): verified against the paper, redesigned local model as binary
+
+User asked to verify a specific architectural claim against the actual paper
+(`A Secure Architecture for ML-Enforced Attack Mitigation in Wireless Sensor Networks.doc`,
+extracted via `antiword` -- no `pandoc`/`libreoffice` available in this environment) before
+changing anything: **the local tier should never classify attack TYPE, only flag suspicion**.
+Confirmed directly in the paper's text:
+
+> "The actual identification of a malicious node is handled through daisy-chained polling
+> amongst immediate neighbors of the node under scrutiny... However, confidently identifying a
+> malicious neighbor is difficult for a single sensor node that lacks a global source of truth
+> for feedback."
+
+> "The RFC is deployed at the Sink, where compute is not the bottleneck; edge deployment on
+> constrained GWN hardware is reserved for a pruned DTC variant in future work."
+
+The paper's only validated classifier (RFC, 99.68% on WSN-DS) is explicitly Sink-tier; multi-class
+attack-type identification at the node level isn't described anywhere in the paper at all — local
+inference is framed purely as a trust-score/anomaly signal feeding the daisy-chain polling, which is
+exactly `WSN_Gateway`/`WSN_Sensor`/`WSN_ClusterHead`'s existing `checkCensusTriggers` (Phase 4). This
+directly justified two changes, both empirically trial-and-error tested before being kept:
+
+**1. Global (Sink) model — no resource constraint, tried better ensembles.** Tried
+`RandomForestClassifier` (more trees + tuned `min_samples_leaf`/`max_features`), `ExtraTreesClassifier`,
+and `HistGradientBoostingClassifier` against the existing RF/DT baseline (macro-F1 0.610):
+
+| Model | macro-F1 |
+|---|---|
+| DecisionTree (baseline) | 0.555 |
+| RandomForest (baseline, 100 trees) | 0.610 |
+| RandomForest (300 trees, tuned) | 0.620 |
+| HistGradientBoosting | 0.421 (worse) |
+| **ExtraTrees (300 trees)** | **0.738** |
+
+`ExtraTreesClassifier` won clearly and is now the third model trained by `train_global_model.py`
+(kept alongside DT/RF for continuity with the paper's framing, not as a replacement). Per-class F1
+improved substantially for the weakest classes (Blackhole 0.52→0.83, DenialOfSleep 0.35→0.67,
+PanicFlood 0.52→0.82); Sybil/Wormhole stayed roughly flat. 500 trees and further `min_samples_leaf`/
+`class_weight='balanced_subsample'` tuning on top of ExtraTrees made no further difference — 300 trees,
+defaults otherwise, is the found optimum.
+
+**2. Local model — redesigned as binary (Attack vs Normal), confirmed IsMalicious is the right label.**
+`local_dataset.csv`'s existing `IsMalicious` column is exactly 1:1 with `AttackTypeName != 'Normal'`
+(verified via crosstab), so it's used directly as the binary label rather than deriving a new column.
+`train_local_model.py` now trains on `IsMalicious` (mapped to `"Attack"`/`"Normal"` for readable
+plots), drops the old multi-class framing entirely, and writes an `attack_type_breakdown.csv`
+alongside the binary `class_distribution.csv` purely for reference (what real attack types are
+lumped into "Attack").
+
+Trial-and-error across DecisionTree (depth 3/4/5), a small RandomForest, and a LogisticRegression
+(the theoretically lightest possible model — included specifically because "lighter model" was an
+explicit goal) found:
+
+| Model | Accuracy | Attack recall | Attack precision |
+|---|---|---|---|
+| DecisionTree depth=3 | 33.8% | **98.5%** | ~0.5% (flags almost everything — not usable) |
+| **DecisionTree depth=4 (chosen default)** | 69.5% | 71.4% | 1.3% |
+| RandomForest (10 trees, depth=4) | 58.7% | 83.3% | 1.1% |
+| LogisticRegression | 68.4% | 61.1% | 1.1% |
+
+`max-depth` default changed from 5 to 4 (found depth=4 the best accuracy/recall balance; depth=3's
+98.5% recall sounds attractive but means it flags two-thirds of all Normal traffic too, which would
+keep the Census layer in constant false-alarm mode — the same failure pattern as the Phase 4
+`neighborTable.TrustScore` bug found earlier in this session). `--resample` was retested for the
+binary task specifically (a fairer test than multi-class, since binary collapses to a single 176:1
+ratio instead of multiple ~1235:1 minority splits) and again found to make no meaningful difference
+(recall within 1-2 points either way) — stayed off by default.
+
+**Precision (~1%) staying low is expected and correct, not a bug to chase**: per the paper's own
+framing, a single node's local signal was never meant to confidently convict a neighbor — it only
+needs to reliably trigger Census daisy-chain polling, which is the actual corroboration/conviction
+mechanism. Recall (~70-85%, meaning most real attacks do get flagged for polling) is the metric that
+matters for a trigger role. `DecisionTreeClassifier` is the recommended deployment choice (cheapest —
+a handful of if/else comparisons, trivially portable to a microcontroller, matches the paper's
+explicit "pruned DTC variant" guidance for edge hardware); RandomForest and LogisticRegression are
+trained and reported alongside purely as reference points, not as alternative deployment candidates.
+
+`train_local_model.py` now also writes `precision_recall.csv` (new `wsn_ids_common.save_precision_recall`
+helper) alongside the existing outputs, since accuracy/F1 alone hide the precision-recall asymmetry
+that's central to this model's actual role.
+
+### Phase 5 follow-up #3 (2026-06-19): one more trial-and-error pass, user asked "can we do better"
+
+User pushed for a further round of tuning on both tiers (`xgboost`/`lightgbm` were already installed,
+unused until now). Results:
+
+**Global**: tried `XGBClassifier` and `LGBMClassifier` (both need integer-encoded labels + explicit
+`compute_sample_weight('balanced', ...)` instead of sklearn's `class_weight='balanced'` string, which
+neither library accepts directly for multiclass — wrapped in a new `wsn_ids_common.LGBMMulticlassWrapper`
+so it drops into the same `fit`/`predict`/`feature_importances_` interface as every other model here):
+
+| Model | macro-F1 |
+|---|---|
+| ExtraTrees (previous best) | 0.738 |
+| XGBoost (300 trees, depth 6) | 0.745 |
+| **LightGBM (300 trees, default depth)** | **0.791** |
+
+Further LightGBM tuning (500-800 estimators, `num_leaves`, `learning_rate`, `min_child_samples`) found
+no improvement beyond defaults at 300 estimators — that's the ceiling for this feature set/sample size.
+LightGBM is now a 4th model in `train_global_model.py`; ExtraTrees is kept too as a comparison point.
+
+**Local**: tried the same gradient-boosted options at comparable per-tree depth with only 5-20 trees
+(to stay within "lighter model" intent) — they did **not** beat a single deeper Decision Tree, so the
+real lever here was depth, not algorithm choice. Swept `max_depth` from 3 to unbounded on the existing
+single tree:
+
+| Depth | Accuracy | Attack Recall | Attack Precision | Verdict |
+|---|---|---|---|---|
+| 3 | 33.8% | 98.5% | 0.5% | Rejected — flags 2/3 of all Normal traffic, floods the Census layer |
+| 4 (previous default) | 69.5% | 71.4% | 1.3% | Superseded |
+| **8 (new default)** | **71.0%** | **85.2%** | **1.6%** | Best on all three axes simultaneously |
+| 10 | 71.3% | 83.3% | 1.6% | Marginal vs. depth=8, no reason to prefer |
+| unbounded | 99.2% | 24.6% | 27.6% | Rejected — nearly memorizes training data, recall collapses (useless as a trigger meant to catch most attacks) |
+
+`--max-depth` default changed from 4 to 8 in `train_local_model.py`. Still a single tree — depth=8 is
+at most 256 leaves, nowhere near an ensemble's memory/compute footprint, so this is a genuine
+"better metrics without sacrificing lightness" win, not a trade-off.
+
+Next steps:
+
+- Wire the local model's binary "Attack" flag into the live simulator as an actual Census-poll
+  trigger (currently `checkCensusTriggers` only fires off rule-based trust-score thresholds; this
+  ML signal isn't yet connected to it — would need a decision on whether the trained model is
+  exported to MATLAB or reimplemented as an equivalent rule/threshold, consistent with the
+  project's existing "rule-based live mitigation, ML for offline reporting" split).
+- Capture one clean live trace of full SILENCE→ENFORCE→BLACKLIST escalation (needs either a
+  larger random-trial budget or a deterministic way to guarantee the picked attacker
+  completes its own handshake before the attack window opens).
+- Phase 6 (dataset rebalancing) — the local-tier weak spots above are a natural candidate:
+  more/longer Blackhole, Grayhole, Wormhole scenarios in the `WSN_Attack_Demo.m` grid once
+  rebalancing is in scope.
+- Phase 7 (reference docs incl. `RESULTS.md` with the honest tier-comparison discussion) not
+  yet started.
+- Phase 3 dataset (`logs/local_dataset.csv`/`sink_dataset.csv`) was generated before the
+  GWN:CH ratio fix and the silence detector; per user decision, it is being kept as-is rather
+  than regenerated, since dataset rows/labels don't depend on either fix (see caveat in
+  `DATASET_GENERATION.md`).
+
+## CH Recruitment: DORMANT Dead-End and Chain-Depth Fix (2026-06-20)
+
+Found while implementing `IDS_METRICS_IMPROVEMENT_PLAN.md`'s CH-tier attack retiering: only
+~6 of a topology's ~16-20 CHs ever registered with the Sink in a 2000-tick run, regardless of
+attack status — most CH telemetry (Normal or malicious) was silently invisible to the global
+model. Root cause was **not** RF-range geometry as first suspected (CH-CH relay chains of up
+to 9 hops were observed working), but a state-machine dead end:
+
+- **`STATE_DORMANT`** (the §2.1 entry above) had no case in `WSN_ClusterHead.m`'s `step()`
+  switch. A CH that exhausted its currently-known GWN/CH candidates plus DVS power-scale
+  attempts entered DORMANT and silently did nothing forever after — even though it kept
+  passively learning about new neighbors via HELLO reception (not state-gated), it never
+  re-checked them. Early in a simulation, when most of the network is still unverified, this
+  is a frequent race, not a rare edge case.
+- **Fix**: removed the DVS-then-DORMANT block entirely. When no candidate is currently visible,
+  the CH just waits (returns, stays in `STATE_SECURE`) — `findBestVerifiedGWN()`/
+  `findBestVerifiedCH()` already re-scan the live, continuously-updated `neighborTable` every
+  tick, so a newly-verified neighbor is picked up automatically next tick. No new "retry"
+  machinery was needed. `STATE_DORMANT` removed from `WSN_Config.m` (zero remaining references
+  after the fix; `WSN_Physics.m`'s `updateBatteryAndSleep` mention was already dead/uncalled
+  code, untouched).
+- **Chain-depth cap**: `isQualifiedToRecruit` was an existing, already-correctly-named property
+  ("set true after receiving local key") that was never actually read anywhere — `handleCHREQ`
+  gated acceptance on `isVerified` alone, and `handleCHJOINOK` (the CH-CH join path, which
+  explicitly has no key exchange) incorrectly set it `true` anyway, contradicting its own
+  doc-comment. Fixed both: `handleCHJOINOK` now sets it `false`, and `handleCHREQ` gates on
+  `~isQualifiedToRecruit`. Net effect: only GWN-anchored CHs can accept further CH recruits,
+  capping every chain at exactly one CH-CH hop (orphan-CH → relay-CH → GWN) instead of
+  unbounded depth.
+- **DVS moved from CH to GWN**: the old CH-side DVS scaled the recruiting CH's own `txPower`
+  to compensate for a coverage gap — burning a power-constrained CH's battery to fix what is
+  structurally a GWN coverage problem. Removed entirely from `WSN_ClusterHead.m`. Added
+  `WSN_Gateway.checkChDiscoveryDVS()` instead: every `GWN_CH_DVS_CHECK_INTERVAL` ticks, if
+  `chChildren` hasn't grown since the last check, scale `controlPower` up (capped at the
+  existing `MaxGWNPower`, reusing the same cap as the pre-existing GWN-GWN backbone DVS in
+  `WSN_Gateway_Behavior.m:557-559`, a different mechanism for a different recruitment
+  direction — GWN-GWN is rejection-driven since GWNs actively recruit each other, CH-discovery
+  is stall-driven since CHs recruit passively by sending CH_REQ on hearing a HELLO). Since
+  `WSN_Physics.m`'s range calculation already uses `controlPower` for tier-3 nodes, this
+  directly extends real broadcast/discovery range to reach distant CHs.
+- **Also fixed**: `rejectedGWNs`/`rejectedCHs` previously only grew, with periodic clears tied
+  to DVS scale-up events (now removed). Without that reset, a CH with few nearby neighbors
+  could still exhaust them all permanently. Added an independent periodic reset
+  (`CH_REJECTED_LIST_RESET_INTERVAL = 40` ticks) decoupled from DVS, so a neighbor rejected
+  early (e.g. busy with another handshake at the time) gets retried later.
+
+Verification: re-ran a clean (no-attacker) topology at the same duration/warmup as the
+pre-fix baseline and compared distinct registered-CH counts and `HopCount` distribution in
+`sink_dataset.csv` (see `DATASET_GENERATION.md` for the before/after numbers).
+

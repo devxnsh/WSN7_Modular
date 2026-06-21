@@ -1,0 +1,16 @@
+Feature,Importance
+CHRatio,0.1920908752239821
+ReportedRSSI,0.18183055461293415
+SelfReportedBattery,0.1801898397039569
+ReportingGap,0.16267925080739767
+TrustScore,0.1350483885032377
+ActiveSensorsRatio,0.09594068189397485
+ExpectedReportRatio,0.02412465805862196
+ReportsReceived,0.02222449077126016
+RerouteCount,0.005871260424634605
+NodeType_GWN,0.0
+NodeType_CH,0.0
+AnomalyCount,0.0
+NodeType_SENSOR,0.0
+RekeyEvent,0.0
+HopCount,0.0

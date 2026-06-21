@@ -1,0 +1,9 @@
+,Blackhole,DenialOfSleep,Flooding,Grayhole,Normal,PanicFlood,Sybil,Wormhole
+Blackhole,11,0,0,0,6,0,0,0
+DenialOfSleep,0,8,0,0,5,0,0,0
+Flooding,0,0,16,0,4,0,0,0
+Grayhole,0,0,0,14,3,0,0,0
+Normal,1,2,4,2,49034,3,2,11
+PanicFlood,0,0,0,0,5,15,0,0
+Sybil,0,0,0,0,4,0,10,0
+Wormhole,0,0,0,0,4,0,0,15
