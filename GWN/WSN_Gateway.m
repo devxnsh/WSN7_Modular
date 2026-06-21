@@ -316,6 +316,21 @@
                 obj.addLogAccess(sprintf('t=%d [CH_DVS] No new CH children since t=%d -- controlPower %.2f -> %.2f (attempt %d/%d)', ...
                     t, obj.chDvsLastCheckTime, oldPower, obj.controlPower, ...
                     obj.chDvsScaleCount, WSN_Config.GWN_CH_DVS_MAX_SCALE_ATTEMPTS), [], t);
+            elseif ~stalled && obj.controlPower > WSN_Config.TxPower_GWN_Control
+                % GWN_Shell.md Issue #4 fix: growth resumed (a new CH child
+                % was found since the last check), so the boost served its
+                % purpose - reset controlPower back to baseline and refresh
+                % the scale-attempt budget. Without this, controlPower only
+                % ever ratchets up (capped at MaxGWNPower) and never comes
+                % back down even after discovery is no longer stalled,
+                % needlessly running the access radio hotter than necessary
+                % (more interference/energy draw on every subsequent HELLO/
+                % CH_ACK) for the rest of the node's life.
+                oldPower = obj.controlPower;
+                obj.controlPower = WSN_Config.TxPower_GWN_Control;
+                obj.chDvsScaleCount = 0;
+                obj.addLogAccess(sprintf('t=%d [CH_DVS] New CH child found -- controlPower reset %.2f -> %.2f (budget refreshed)', ...
+                    t, oldPower, obj.controlPower), [], t);
             end
 
             obj.chDvsLastCheckTime = t;

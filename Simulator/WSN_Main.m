@@ -761,6 +761,18 @@ end
             end
             
             % 2. COMBINED FEED (all nodes unified log in one file)
+            % NOTE ON PERSISTENCE: this block clears each node's
+            % log/logBackbone/logAccess (string history) after exporting it
+            % - see the per-field comments below. That clearing is scoped
+            % ONLY to those three text-log arrays. Trust state
+            % (neighborTrust on SN/CH/GWN, globalTrustRegistry/resetHistory
+            % on Sink) lives in entirely separate node properties that this
+            % function never reads or writes, so trust scores persist for
+            % the life of the node regardless of how often logs are
+            % exported/cleared. The only code path that resets trust is the
+            % intentional SHUTDOWN_SOFT_RESET handler (attack-response
+            % trust reset, part of the Census/Shutdown protocol) - not
+            % autolog.
             combinedFile = sprintf('logs/combined_t0-%d_%s.csv', t, timestamp);
             fid = fopen(combinedFile, 'w');
             fprintf(fid, 'NodeID,NodeType,Tier,RadioType,LogEntry\n');

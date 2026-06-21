@@ -54,17 +54,24 @@
 **Reference**: checkReportingSilence() in WSN_Gateway_Behavior.m
 
 ### Issue #3: Backbone FSM Deadlock on Token Loss
-**Symptom**: Token frame dropped mid-collision-avoidance sequence → children starve
-**Root Cause**: Token timer not reset on ACK, message loss causes asymmetry
-**Workaround**: Timeout-based token recovery (if no ACK in N TFs, resend)
-**Status**: MITIGATED (v1.2)
-**Future**: Implement explicit token timeout recovery
+**Status**: OBSOLETE (confirmed 2026-06-21) — Token-based flow control (Type
+8: TOKEN_DOWN/TOKEN_REQ/PATH_COMPLETE) has been fully replaced by phase
+scheduling. `handleReceive` now just logs `[IGNORED] TOKEN.%d ... (phase
+scheduling active)` and returns for every Type 8 message
+(`WSN_Gateway_Messaging.m:296-300`) — no GWN ever acts on a TOKEN frame
+anymore, so the deadlock this issue describes can no longer occur. Left
+here for history rather than deleted; `GWN_Index.m` still documents Type 8
+as if active and should be read with this in mind.
 
 ### Issue #4: DVS Power Boost Doesn't Reset
-**Symptom**: Boost access radio power to find CHs, never reduce even after growth
-**Root Cause**: DVS check runs every N TFs, but doesn't compare to last known max
-**Workaround**: Manual power reset on CH count growth detection
-**Status**: MONITORING (rare, low impact)
+**Status**: FIXED (2026-06-21) — `checkChDiscoveryDVS` (`GWN/WSN_Gateway.m`)
+only ever scaled `controlPower` up on a stall and never reduced it once
+discovery resumed. Added the symmetric case: when a new CH child is found
+(`~stalled`) and `controlPower` is above baseline, reset it back to
+`WSN_Config.TxPower_GWN_Control` and refresh `chDvsScaleCount` to 0 (so a
+future stall can scale up again instead of having already exhausted its
+attempt budget from a prior, now-resolved stall). Verified: parses cleanly,
+included in the standard headless regression run.
 
 ---
 

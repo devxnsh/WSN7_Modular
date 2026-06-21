@@ -111,11 +111,25 @@ BOOT → DISCOVERY (wait for verified GWN)
 **Status**: FIXED (v1.1) — Forgiveness window implemented
 
 ### Issue #6: Handshake Lock Can't Recover from Partial Failure
-**Symptom**: CH sends CH_REQ, receives partial ACK, lock stuck forever
-**Root Cause**: Radio lock not cleared on bad checksum or timeout
-**Solution**: handleTimeout() sends REJECT to partner as orphan guard
-**Status**: MITIGATED (v1.2) — Timeout recovery added; but radio lock may persist in edge case
-**Future**: Consider lock reset on bad checksum
+**Symptom**: CH sends CH_REQ, receives partial/corrupted ACK; lock held until
+timeout (re-investigated 2026-06-21 — NOT actually "forever" as originally
+worded).
+**Root Cause**: `receive()` (`WSN_ClusterHead.m:325`) requires
+`msg.verifyChecksum()` before any CH_CMD handler runs, so a bad-checksum
+reply is silently dropped with no immediate lock-clearing side effect.
+**Solution**: `handleTimeout()` (`WSN_ClusterHead.m:527`) already correctly
+clears both the radio lock (`obj.radio.clearLock('TIMEOUT')`) and the FSM
+handshake state (`obj.handshakePartner = []`, back to `STATE_SECURE`) once
+the lock timer expires - confirmed by reading the full function body.
+**Status**: ADEQUATELY MITIGATED, "Future" suggestion retracted — a
+corrupted message's `src` field can't be trusted (the checksum covers the
+whole frame, so if it fails, *every* field including `src` is unverified).
+Clearing the lock based on an unverified sender would let an attacker
+force-clear any node's in-progress handshake by sending spoofed garbage
+addressed as if from the current partner - a denial-of-service vector, not
+a safe optimization. The existing wait-for-timeout design is the correct
+tradeoff: worst case is a bounded 20-TF stall (the handshake lock timer),
+not an unbounded one. Not changed.
 
 ---
 
