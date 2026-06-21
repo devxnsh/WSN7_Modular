@@ -73,6 +73,17 @@ future stall can scale up again instead of having already exhausted its
 attempt budget from a prior, now-resolved stall). Verified: parses cleanly,
 included in the standard headless regression run.
 
+### Issue #5: CH-Discovery DVS Ran Before This GWN Was Itself Verified
+**Status**: FIXED (2026-06-21) — `checkChDiscoveryDVS` had no gate on this
+GWN's own `isVerified`, so an unverified GWN (no confirmed backbone path to
+the Sink yet) could still spend access-radio power-scaling budget recruiting
+CHs it had nowhere to forward data for. Added `if ~obj.isVerified, return;
+end` at the top of `checkChDiscoveryDVS`. This is also now one half of a
+matched pair: the CH side gained its own, more conservative DVS
+(`checkChPeerDiscoveryDVS` / `checkChOrphanDVS` in
+`CH/WSN_ClusterHead.m`, documented in `CH_Documentation.md` §8) so
+connectivity-frontier widening is no longer GWN-only.
+
 ---
 
 ## Decision Matrix / Trust Scoring

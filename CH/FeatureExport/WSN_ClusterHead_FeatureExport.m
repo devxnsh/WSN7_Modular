@@ -44,6 +44,7 @@ classdef WSN_ClusterHead_FeatureExport
                 msg.subtype = WSN_Config.SENSOR_SUB_AGG;  % 5.2
                 msg.src = hex2dec(obj.hexID);
                 msg.dst = obj.parent;
+                msg.originalSrc = hex2dec(obj.hexID);  % True identity, preserved verbatim through any relay latches
                 msg.ttl = 5;
                 msg.seq = mod(t + fragIdx, 256);
 
@@ -64,10 +65,17 @@ classdef WSN_ClusterHead_FeatureExport
                 msg.payload = payload;
                 msg.payloadLen = numel(payload);
 
-                % LOCAL ENCRYPTION: Only if CH has localKey (parent is GWN)
-                % CH-CH has no key exchange, so localKey is empty -> no encryption
+                % LOCAL ENCRYPTION: Only if CH has localKey (set once GWN-
+                % verified, direct or relayed -- every verified CH has one
+                % now). Passkey is appended as the last payload byte BEFORE
+                % encryption, per spec, so it travels inside the same
+                % encrypted envelope as the sensor data.
                 if ~isempty(obj.localKey)
-                    msg.payload = WSN_Crypto.encrypt(payload, obj.localKey);
+                    payloadWithPasskey = payload;
+                    if ~isempty(obj.passkey)
+                        payloadWithPasskey = [payloadWithPasskey, uint8(obj.passkey)];
+                    end
+                    msg.payload = WSN_Crypto.encrypt(payloadWithPasskey, obj.localKey);
                     msg.payloadLen = numel(msg.payload);
                     msg.setEncrypted(true);
                 end

@@ -27,8 +27,11 @@
 % Property: chLastAggSeen | Line 89 | Last 5.2 aggregation time per CH child
 % Property: chAggSilenceFlagged | Line 90 | CH IDs with reporting silence
 % Property: pendingChildren | Line 93 | CHs awaiting ENC_HELLO (timeout 15 TF)
-% Property: chDvsLastCheckTime | Line 80 | Last DVS power adjustment check
-% Property: chDvsLastChildCount | Line 81 | Child count at last DVS check
+% Property: chPeerDvsLastCheckTime | Peer-discovery DVS last check (verified GWN-anchored CH)
+% Property: chPeerDvsLastChildCount | CH-child count at last peer-discovery DVS check
+% Property: chPeerDvsScaleCount | Peer-discovery DVS scale-up attempts used
+% Property: chOrphanDvsLastCheckTime | Orphan-rescue DVS last check (unverified CH, t>=600)
+% Property: chOrphanDvsScaleCount | Orphan-rescue DVS scale-up attempts used
 
 % Constructor
 % WSN_ClusterHead() | Line 44 | Default constructor, sets tier=2, state=BOOT
@@ -73,6 +76,20 @@
 %   STATE: HANDSHAKE (waiting for ACK/REJECT)
 %     → Monitor lock timer (20 TF timeout)
 %     → Wait for response message
+
+% =====================================================
+% DYNAMIC VOLTAGE SCALING (DVS) — CH SIDE
+% =====================================================
+% FUNCTION: checkChPeerDiscoveryDVS(t) | Widens own txPower if CH-child
+%   count stalls. Gated on isVerified && isQualifiedToRecruit (GWN-anchored
+%   only, one-hop cap). Passive-only: never initiates, just widens HELLO
+%   range for an unverified peer CH to discover. See WSN_Config.CH_PEER_DVS_*.
+
+% FUNCTION: checkChOrphanDVS(t) | Last-resort widen of own txPower if still
+%   unverified past t=WSN_Config.CH_ORPHAN_DVS_START_TIME (600). Targets
+%   discovery of any verified GWN or CH; the existing SECURE-state FSM
+%   still drives CH_REQ initiation/retries once a candidate is visible.
+%   See WSN_Config.CH_ORPHAN_DVS_*.
 
 % FUNCTION: findBestVerifiedGWN() | Line 547 | Find closest verified GWN
 %   Returns: uint16 (node ID) or empty

@@ -8,14 +8,51 @@ classdef WSN_ClusterHead < WSN_Node
         localKey = []                  % Local key received from GWN (empty if parent is CH)
         
         % --- RECRUITMENT STATE ---
-        retryTarget = []               % Current GWN being recruited
+        retryTarget = []               % Current GWN/CH neighbor being recruited (relay target, not necessarily the GWN itself)
         retryCount = 0                 % Attempts so far for current target
         rejectedGWNs = []              % List of GWNs that rejected/timed out
         handshakePartner = []          % Lock partner during handshake
-        isQualifiedToRecruit = false   % Can recruit other CHs (true only when GWN-anchored -- caps CH-CH chains at one hop)
         rejectedCHs = []               % List of CHs that rejected
         retryBackoff = 0               % Randomized backoff timer (2-5 timeframes)
         lastRejectResetTime = 0        % Last time rejectedGWNs/rejectedCHs were cleared
+
+        % --- TRANSPARENT RELAY / LATCH (replaces the old one-hop CH-CH cap) ---
+        % Any verified CH may now relay an arbitrary-depth chain of further
+        % CHs up to the GWN, acting as a transparent "latch": it physically
+        % retransmits the handshake/data verbatim (no re-encryption, no
+        % re-sourcing) while the GWN ends up individually verifying+keying
+        % every CH regardless of depth, oblivious to the relay. See
+        % handleCHREQ / relayMessageIfNotMine and CH_Documentation.md.
+        passkey = []                   % 5-bit (0-31) verification passkey issued by GWN alongside localKey
+        relayTable = struct('leafID',{}, 'nextHop',{}, 'lastActive',{})  % One row per CH this latch relays for: leafID -> immediate physical neighbor to forward toward
+        relayQueue = {}                 % FIFO of in-flight data/fragment messages awaiting this CH's own next TX opportunity (control/recruitment/priority traffic bypasses this entirely)
+        pendingRelayFragments = struct('leafID',{}, 'nextHop',{}, 'seq',{}, 'fragIdx',{}, 'totalFrags',{}, 'msg',{}, 'retryCount',{}, 'lastRetryTime',{})  % Generalizes pendingAgg/pendingFragments into a table: one outstanding per-hop ACK per leaf this latch relays for
+        localTxBudgetCounter = 0        % Fairness counter: guarantees this CH's own local TX isn't permanently starved behind relay traffic (WSN_Config.RELAY_LOCAL_TX_FAIRNESS)
+
+        % --- CH PEER-DISCOVERY DVS (verified CH widens its own txPower
+        % footprint so a still-unverified peer CH can hear it and choose to
+        % join -- see WSN_Config.CH_PEER_DVS_*). Mirrors
+        % WSN_Gateway.checkChDiscoveryDVS. Used to be gated on
+        % isQualifiedToRecruit (one-hop cap); now gates on isVerified alone
+        % since any verified CH can relay. Deliberately more conservative
+        % than the GWN's equivalent (battery-limited, single radio, no
+        % charging circuit -- see updatePhysics), and slower still now that
+        % relay chains do most of the connectivity-propagation work
+        % passively (see CH_Documentation.md).
+        chPeerDvsLastCheckTime = 0
+        chPeerDvsLastChildCount = 0
+        chPeerDvsScaleCount = 0
+
+        % --- CH ORPHAN-RESCUE DVS (still-unverified CH past
+        % WSN_Config.CH_ORPHAN_DVS_START_TIME widens its own footprint to
+        % discover ANY verified GWN or CH). Last-resort: only fires once the
+        % normal passive recruitment FSM below has had a long, unforced
+        % chance to find a candidate on its own. Only ever widens HELLO
+        % broadcast range -- the SECURE-state FSM still owns CH_REQ
+        % initiation/retry once a verified candidate appears in
+        % neighborTable.
+        chOrphanDvsLastCheckTime = 0
+        chOrphanDvsScaleCount = 0
 
         % --- SENSOR DATA AGGREGATION ---
         sensorTable = struct('id',{}, 'lastTime',{}, 'value',{}, 'rssi',{}, 'battery',{})
@@ -134,7 +171,19 @@ classdef WSN_ClusterHead < WSN_Node
                     t, uint8(obj.battery), numel(obj.neighborTable)));
                 obj.scheduleNextHelloBurst(t);
             end
-            
+
+            % --- CH PEER-DISCOVERY DVS: widen footprint for unverified peer CHs ---
+            obj.checkChPeerDiscoveryDVS(t);
+
+            % --- CH ORPHAN-RESCUE DVS: still-unverified past t=600, widen footprint ---
+            obj.checkChOrphanDVS(t);
+
+            % --- RELAY/LATCH QUEUE: flush queued data/fragments for relayed
+            % CHs (control/recruitment/priority traffic never queues -- it is
+            % always sent immediately from its own handler) ---
+            relayMsgs = obj.processRelayQueue(t);
+            if ~isempty(relayMsgs), msgs = [msgs, relayMsgs]; end
+
             % --- HANDSHAKE TIMEOUT CHECK ---
             if obj.state == WSN_Config.STATE_HANDSHAKE && ~isempty(obj.handshakePartner)
                 obj.radio.lockTimer = obj.radio.lockTimer - 1;
@@ -310,6 +359,23 @@ classdef WSN_ClusterHead < WSN_Node
                 return;
             end
             
+            % --- TRANSPARENT RELAY INTERCEPT ---
+            % A message wire-addressed to me (isForMe) but logically
+            % concerning a DIFFERENT CH (msg.originalSrc set and not my own
+            % ID) means I'm an intermediate latch, not the endpoint -- relay
+            % it verbatim per my relayTable instead of processing it as my
+            % own business. 6.0 CH_REQ and 6.4 CH_JOINOK are excluded: 6.0
+            % does its own relay-and-establish inside handleCHREQ, and 6.4 is
+            % always hop-local only (never carries a relayed originalSrc).
+            if isForMe && msg.verifyChecksum() && msg.originalSrc ~= 0 && msg.originalSrc ~= myID
+                isRelayEligible = (msg.type == WSN_Config.MSG_TYPE_CH_CMD && msg.subtype ~= WSN_Config.CH_SUB_REQ && msg.subtype ~= WSN_Config.CH_SUB_JOINOK) || ...
+                    (msg.type == WSN_Config.MSG_TYPE_CH_HELLO && (msg.subtype == WSN_Config.SENSOR_SUB_AGG || msg.subtype == WSN_Config.SENSOR_SUB_ACK));
+                if isRelayEligible
+                    response = obj.relayMessageIfNotMine(msg, t);
+                    return;
+                end
+            end
+
             % --- CH_HELLO (Type 5) - Handle 5.2 and 5.3 ---
             if msg.type == WSN_Config.MSG_TYPE_CH_HELLO && isForMe && msg.verifyChecksum()
                 if msg.subtype == WSN_Config.SENSOR_SUB_AGG  % 5.2 SENSOR_AGG from child CH
@@ -320,7 +386,7 @@ classdef WSN_ClusterHead < WSN_Node
                     return;
                 end
             end
-            
+
             % --- CH_CMD (Type 6) - Process if for me ---
             if msg.type == WSN_Config.MSG_TYPE_CH_CMD && isForMe && msg.verifyChecksum()
                 response = obj.handleCHCMD(msg, t, rssi);
@@ -338,108 +404,95 @@ classdef WSN_ClusterHead < WSN_Node
                 case WSN_Config.CH_SUB_ACK     % 6.1 CH_ACK from GWN
                     obj.handleCHACK(msg, t);
                     
-                case WSN_Config.CH_SUB_JOINOK  % 6.4 CH_JOINOK from CH
+                case WSN_Config.CH_SUB_JOINOK  % 6.4 CH_JOINOK: hop-local "I'll latch for you" ack
                     obj.handleCHJOINOK(msg, t);
-                    
-                case WSN_Config.CH_SUB_REJECT  % 6.3 CH_REJECT from GWN or CH
+
+                case WSN_Config.CH_SUB_REJECT  % 6.3 CH_REJECT: hop-local rejection (relayed rejects are intercepted earlier, see receive())
                     obj.handleCHREJECT(msg, t);
-                    
-                case WSN_Config.CH_SUB_INFO    % 6.5 CH_INFO
-                    obj.handle_CH_INFO(msg, t);
             end
         end
         
         function response = handleCHREQ(obj, msg, t)
-            % 6.0 CH_REQ: CH wants to join this CH
-            % Response: 6.4 CH_JOINOK if qualified, else 6.3 CH_REJECT
+            % 6.0 CH_REQ: a neighboring CH wants to join the network through
+            % me. Under the relay-latch model (replaces the old one-hop
+            % isQualifiedToRecruit cap) this is "not a message of its own" --
+            % it's always treated as a relay request: I become a transparent
+            % latch for the requester's true identity (msg.originalSrc, or
+            % msg.src if this is the requester's very first hop) and forward
+            % the SAME request one hop further toward my own parent, exactly
+            % like createRelayForward does for the GWN-GWN backbone. The GWN
+            % ultimately verifies+keys the requester directly and is
+            % oblivious to how many hops the request crossed.
             response = [];
             sender = msg.src;
-            
-            % Only GWN-anchored CHs may recruit further CHs -- caps every
-            % CH-CH chain at one hop (orphan-CH -> relay-CH -> GWN), instead
-            % of the relay-CH itself being recruited through and extending
-            % the chain indefinitely.
-            if ~obj.isQualifiedToRecruit
-                obj.addLog(sprintf('t=%d [CH_REJECT] %s (not qualified to recruit -- not GWN-anchored)', ...
+            leafID = msg.originalSrc;
+            if leafID == 0, leafID = sender; end  % First hop: requester is its own leaf
+
+            % I can only relay if I myself have an upstream path -- mirrors
+            % the old "not qualified" rejection, now meaning "no parent yet"
+            % rather than "not GWN-anchored" (every verified CH qualifies).
+            if isempty(obj.parent)
+                obj.addLog(sprintf('t=%d [CH_REJECT] %s (no upstream path yet)', ...
                     t, dec2hex(uint16(sender), 4)));
-                response = obj.createCHREJECT(sender, t);
+                response = obj.createCHREJECT(sender, t, leafID);
                 return;
             end
-            
-            % Check if already locked with another partner (Access radio)
-            if ~isempty(obj.handshakePartner) && obj.handshakePartner ~= sender
-                obj.addLog(sprintf('t=%d [CH_REJECT] %s (locked with %s)', ...
-                    t, dec2hex(uint16(sender), 4), dec2hex(uint16(obj.handshakePartner), 4)));
-                response = obj.createCHREJECT(sender, t);
-                return;
-            end
-            
-            % Accept CH: Enter Access radio lock and send CH_JOINOK
-            obj.radio.setLock(sender, WSN_Config.CH_ACCESS_LOCK_TIMER);
-            
-            obj.addLog(sprintf('t=%d [CH_JOINOK] -> %s', ...
-                t, dec2hex(uint16(sender), 4)));
-            
-            response = obj.createCHJOINOK(sender, t);
-            
-            % Add the recruited CH to children
-            obj.children = [obj.children, sender];
-            obj.addLog(sprintf('t=%d [CHILD_ADDED] %s', t, dec2hex(uint16(sender), 4)));
-            
-            % Send 6.5 CH_INFO to parent GWN (encrypted)
-            if ~isempty(obj.parent)
-                infoMsg = obj.createCHINFO(sender, t);
-                obj.radio.requestTX(infoMsg);  % Send immediately
-                obj.addLog(sprintf('t=%d [CH_INFO] -> parent %s (recruited %s)', ...
-                    t, dec2hex(uint16(obj.parent), 4), dec2hex(uint16(sender), 4)));
-            end
+
+            % Accept: refresh/add the relayTable route for this leaf.
+            obj.addRelayRoute(leafID, sender, t);
+
+            % Three control messages this tick: hop-local 6.4 JOINOK (back
+            % to the requester), the relayed 6.0 CH_REQ (up to my parent),
+            % and a 6.5 CH_INFO topology announcement (also up to my
+            % parent). All three are returned as the function's `response`
+            % array rather than via obj.radio.requestTX -- the radio only
+            % accepts ONE requestTX per tick (txPending guard), but
+            % WSN_Main's receive()-response path pushes every element of
+            % `response` straight onto txBuffer and lets them depart one
+            % per tick on their own (see Simulator/WSN_Main.m ~line 488),
+            % which is also exactly the per-hop latency this design wants.
+            response = [obj.createCHJOINOK(sender, t)];
+
+            fwd = WSN_Message();
+            fwd.type = WSN_Config.MSG_TYPE_CH_CMD;
+            fwd.subtype = WSN_Config.CH_SUB_REQ;
+            fwd.src = hex2dec(obj.hexID);
+            fwd.dst = obj.parent;
+            fwd.originalSrc = leafID;
+            fwd.ttl = msg.ttl;
+            fwd.seq = msg.seq;
+            fwd.addChecksum();
+            response = [response, fwd];
+
+            response = [response, obj.createCHINFO(leafID, t)];
+
+            obj.addLog(sprintf('t=%d [CH_JOINOK+RELAY+INFO] latching for %s -> requester %s, parent %s', ...
+                t, dec2hex(uint16(leafID), 4), dec2hex(uint16(sender), 4), dec2hex(uint16(obj.parent), 4)));
         end
         
         function handleCHJOINOK(obj, msg, t)
-            % 6.4 CH_JOINOK: CH→CH join acceptance
+            % 6.4 CH_JOINOK: hop-local-only ack from the adjacent CH I just
+            % sent a CH_REQ to, confirming "I'll latch/relay for you." This
+            % is NOT end-to-end verification -- it carries no key and does
+            % not set isVerified/parent. It just refreshes my handshake lock
+            % timer so I don't time out while the rest of the relay chain
+            % (possibly several more hops, each with its own latency) is
+            % still working on reaching the GWN. Real verification arrives
+            % later via 6.1 CH_ACK, reverse-latched back down this same path.
             sender = msg.src;
-            
-            % Validate we're expecting this
+
             if obj.state ~= WSN_Config.STATE_HANDSHAKE || sender ~= obj.handshakePartner
                 obj.addLog(sprintf('t=%d [IGNORE] CH_JOINOK from %s (not partner)', ...
                     t, dec2hex(uint16(sender), 4)));
                 return;
             end
-            
-            obj.addLog(sprintf('t=%d [CH_JOINOK] from %s', ...
+
+            obj.addLog(sprintf('t=%d [CH_JOINOK] %s will latch for me -- awaiting GWN CH_ACK', ...
                 t, dec2hex(uint16(sender), 4)));
-            
-            % Clear lock and mark verified
-            obj.radio.clearLock('SUCCESS');
-            obj.handshakePartner = [];
-            obj.parent = sender;
-            % Note: localKey stays empty - no key exchange in CH-CH
-            obj.isVerified = true;
-            obj.isQualifiedToRecruit = false;  % Not GWN-anchored -- cannot recruit further (one CH-CH hop max)
-            obj.state = WSN_Config.STATE_SECURE;
-            obj.retryTarget = [];
-            obj.retryCount = 0;
-            
-            obj.addLog(sprintf('t=%d [VERIFIED] parent=CH %s (no localKey, unencrypted comms)', ...
-                t, dec2hex(uint16(obj.parent), 4)));
+            obj.radio.refreshLock(WSN_Config.CH_ACCESS_LOCK_TIMER);
         end
-                function handle_CH_INFO(obj, msg, t)
-            % 6.5 CH_INFO: Forward to parent
-            if isempty(obj.parent)
-                obj.addLog(sprintf('t=%d [DROP] CH_INFO - no parent', t));
-                return;
-            end
-            
-            % Forward the message to parent
-            fwd = WSN_Message(6, hex2dec(obj.hexID), obj.parent, msg.payload);
-            fwd.subtype = WSN_Config.CH_SUB_INFO;
-            fwd.flag = msg.flag;  % Preserve encryption flags
-            fwd.addChecksum();
-            
-            obj.radio.requestTX(fwd);
-            obj.addLog(sprintf('t=%d [CH_INFO_FWD] -> parent %s', t, dec2hex(uint16(obj.parent), 4)));
-        end
-                function handleCHACK(obj, msg, t)
+
+        function handleCHACK(obj, msg, t)
             % 6.1 CH_ACK: GWN→CH with local key in payload
             sender = msg.src;
             
@@ -450,16 +503,19 @@ classdef WSN_ClusterHead < WSN_Node
                 return;
             end
             
-            % Extract local key from payload (first 16 bytes)
-            if msg.payloadLen >= 16
+            % Extract local key (first 16 bytes) + the new 5-bit passkey
+            % (byte 17), issued together by the GWN regardless of how many
+            % relay hops this ACK crossed to reach me.
+            if msg.payloadLen >= 17
                 obj.localKey = msg.payload(1:16);
+                obj.passkey = msg.payload(17);
             else
-                obj.addLog(sprintf('t=%d [ERROR] CH_ACK missing key payload', t));
+                obj.addLog(sprintf('t=%d [ERROR] CH_ACK missing key/passkey payload', t));
                 return;
             end
-            
-            obj.addLog(sprintf('t=%d [CH_ACK] Received key from %s', ...
-                t, dec2hex(uint16(sender), 4)));
+
+            obj.addLog(sprintf('t=%d [CH_ACK] Received key+passkey=%d from %s', ...
+                t, obj.passkey, dec2hex(uint16(sender), 4)));
             
             % Refresh lock
             obj.radio.refreshLock(WSN_Config.CH_ACCESS_LOCK_TIMER);
@@ -475,31 +531,40 @@ classdef WSN_ClusterHead < WSN_Node
             obj.radio.clearLock('SUCCESS');
             obj.handshakePartner = [];
             obj.parent = sender;
-            % localKey was set earlier from CH_ACK payload - enables encrypted comms
+            % localKey/passkey were set earlier from CH_ACK payload - enables
+            % encrypted, passkey-stamped comms. Any verified CH can now
+            % relay further CHs (no more isQualifiedToRecruit one-hop gate).
             obj.isVerified = true;
-            obj.isQualifiedToRecruit = true;  % Now qualified to recruit other CHs
             obj.state = WSN_Config.STATE_SECURE;
             obj.retryTarget = [];
             obj.retryCount = 0;
-            
-            obj.addLog(sprintf('t=%d [VERIFIED] parent=GWN %s (localKey set, encrypted comms)', ...
+            % Verified -- any orphan-rescue txPower boost has served its
+            % purpose; reset to baseline. CH_PEER_DVS takes over from here
+            % if this CH's own further-CH recruitment stalls.
+            obj.txPower = WSN_Config.TxPower_CH;
+            obj.chOrphanDvsScaleCount = 0;
+
+            obj.addLog(sprintf('t=%d [VERIFIED] parent=%s (localKey+passkey set, encrypted comms)', ...
                 t, dec2hex(uint16(obj.parent), 4)));
         end
-        
+
         function handleCHREJECT(obj, msg, t)
-            % 6.3 CH_REJECT: Move to next viable target
+            % 6.3 CH_REJECT: hop-local rejection (a relayed reject for a
+            % DIFFERENT CH's identity is intercepted earlier in receive() and
+            % never reaches here -- see relayMessageIfNotMine). Move to next
+            % viable target.
             sender = msg.src;
-            
+
             obj.addLog(sprintf('t=%d [CH_REJECT] from %s', ...
                 t, dec2hex(uint16(sender), 4)));
-            
-            % PURGE: If sender was our parent, clear it and purge local key
+
+            % PURGE: If sender was our parent, clear it and purge local key/passkey
             if ~isempty(obj.parent) && obj.parent == sender
                 obj.addLog(sprintf('t=%d [PURGE] parent %s (rejected)', t, dec2hex(uint16(sender),4)));
                 obj.parent = [];
                 obj.isVerified = false;
-                obj.isQualifiedToRecruit = false;
-                obj.localKey = [];  % Purge local key on rejection
+                obj.localKey = [];   % Purge local key on rejection
+                obj.passkey = [];    % Purge passkey on rejection
             end
             
             % PURGE: If sender was a child, remove them
@@ -552,7 +617,308 @@ classdef WSN_ClusterHead < WSN_Node
             obj.retryBackoff = randi([2 5]);
             obj.state = WSN_Config.STATE_SECURE;  % Will retry in SECURE
         end
-        
+
+        % =====================================================
+        % TRANSPARENT RELAY / LATCH (replaces the old one-hop CH-CH cap)
+        % =====================================================
+        function addRelayRoute(obj, leafID, nextHop, t)
+            % Add/refresh the relayTable row for leafID -> nextHop (the
+            % immediate physical neighbor to forward toward, both uplink
+            % and downlink, for this leaf).
+            idx = find([obj.relayTable.leafID] == leafID, 1);
+            if isempty(idx)
+                obj.relayTable(end+1) = struct('leafID', leafID, 'nextHop', nextHop, 'lastActive', t);
+            else
+                obj.relayTable(idx).nextHop = nextHop;
+                obj.relayTable(idx).lastActive = t;
+            end
+        end
+
+        function nextHop = findRelayRoute(obj, leafID)
+            % Look up the immediate neighbor to forward toward for leafID.
+            % Empty if this CH is not latching for that leaf.
+            nextHop = [];
+            if isempty(obj.relayTable), return; end
+            idx = find([obj.relayTable.leafID] == leafID, 1);
+            if ~isempty(idx)
+                nextHop = obj.relayTable(idx).nextHop;
+            end
+        end
+
+        function purgeRelayRoute(obj, leafID)
+            % Tear down a stale relay route (explicit reject/timeout for
+            % that leaf) -- mirrors how rejectedCHs purges a failed target.
+            if isempty(obj.relayTable), return; end
+            obj.relayTable([obj.relayTable.leafID] == leafID) = [];
+            obj.pendingRelayFragments([obj.pendingRelayFragments.leafID] == leafID) = [];
+        end
+
+        function response = relayMessageIfNotMine(obj, msg, t)
+            % Single chokepoint for transparent forwarding, both uplink
+            % (toward the GWN) and downlink (back toward the leaf). Rewrites
+            % src/dst to the immediate next physical hop (so WSN_Main's
+            % physAdj-based delivery succeeds) while leaving originalSrc,
+            % payload, flag and ttl untouched -- "without any insignia,
+            % encryption or passkey" beyond what was already there.
+            % Control/recruitment/priority messages (6.1/6.2/6.3/6.5) are
+            % sent immediately; only 5.2/5.3 data/fragment traffic queues
+            % (see processRelayQueue).
+            response = [];
+            leafID = msg.originalSrc;
+            downstreamHop = obj.findRelayRoute(leafID);
+
+            if isempty(downstreamHop)
+                % No route for this leaf (route purged/never established) --
+                % nothing to relay to; drop silently rather than guessing.
+                obj.addLog(sprintf('t=%d [RELAY_DROP] no route for %s', t, dec2hex(uint16(leafID), 4)));
+                return;
+            end
+
+            % Direction: if this hop arrived FROM the recorded downstream
+            % neighbor, it's travelling uplink (toward the GWN) and the next
+            % hop is my own parent. Otherwise it arrived from upstream (my
+            % parent or an even-deeper relay) and is travelling downlink
+            % back toward the leaf, so the next hop is the recorded
+            % downstream neighbor.
+            if msg.src == downstreamHop
+                nextHop = obj.parent;
+                if isempty(nextHop)
+                    % Lost my own upstream path -- can't continue relaying
+                    % this leaf uplink. Tear down the now-useless route.
+                    obj.addLog(sprintf('t=%d [RELAY_DROP] no parent to relay %s uplink', t, dec2hex(uint16(leafID), 4)));
+                    obj.purgeRelayRoute(leafID);
+                    return;
+                end
+            else
+                nextHop = downstreamHop;
+            end
+
+            isData = (msg.type == WSN_Config.MSG_TYPE_CH_HELLO);
+            if isData && msg.subtype == WSN_Config.SENSOR_SUB_AGG
+                % 5.2 fragment: queue for this CH's own next TX opportunity,
+                % track for independent per-hop ACK/resend, and ACK the
+                % immediate sender right away (hop-by-hop reliability -- the
+                % sender doesn't wait for the whole chain, just this hop).
+                obj.enqueueRelayFragment(leafID, nextHop, msg, t);
+                totalFrags = 1; fragIdx = 1;
+                if msg.payloadLen >= 2
+                    totalFrags = msg.payload(1); fragIdx = msg.payload(2);
+                end
+                response = obj.createAggACK(msg.src, msg.seq, t, fragIdx, totalFrags);
+            elseif isData && msg.subtype == WSN_Config.SENSOR_SUB_ACK
+                % 5.3 ack for something WE forwarded -- clears our own
+                % pending retry for this hop; terminates here (does not
+                % itself need further relaying back to the leaf, since the
+                % leaf already got its own immediate hop's ack).
+                obj.clearRelayFragmentAck(leafID, msg);
+            else
+                % Control/recruitment/priority: returned as `response` (not
+                % obj.radio.requestTX -- the radio only accepts one requestTX
+                % per tick; `response` is the unthrottled receive()-response
+                % channel, see the comment in handleCHREQ above) so it's
+                % never delayed behind queued data (6.3 CH_REJECT also tears
+                % down the route it concerns).
+                fwd = WSN_Message();
+                fwd.type = msg.type;
+                fwd.subtype = msg.subtype;
+                fwd.src = hex2dec(obj.hexID);
+                fwd.dst = nextHop;
+                fwd.originalSrc = msg.originalSrc;
+                fwd.ttl = msg.ttl;
+                fwd.seq = msg.seq;
+                fwd.flag = msg.flag;
+                fwd.payload = msg.payload;
+                fwd.payloadLen = msg.payloadLen;
+                fwd.prio = msg.prio;
+                fwd.addChecksum();
+                fwd.color = msg.color;
+
+                response = fwd;
+                if msg.type == WSN_Config.MSG_TYPE_CH_CMD && msg.subtype == WSN_Config.CH_SUB_REJECT
+                    obj.purgeRelayRoute(leafID);
+                end
+            end
+        end
+
+        function enqueueRelayFragment(obj, leafID, nextHop, msg, t)
+            % Queue a relayed 5.2 fragment for this CH's own next TX slot,
+            % and track it for independent per-hop ACK/resend (generalizes
+            % the single pendingAgg/pendingFragments singleton into a table
+            % keyed by leaf+fragment, since a latch can have several leaves'
+            % fragments in flight concurrently).
+            fragIdx = 1;
+            if msg.payloadLen >= 2
+                fragIdx = msg.payload(2);
+            end
+            if numel(obj.relayQueue) >= WSN_Config.RELAY_QUEUE_MAX
+                obj.relayQueue(1) = [];  % Drop oldest to bound memory
+            end
+            obj.relayQueue{end+1} = struct('leafID', leafID, 'nextHop', nextHop, 'msg', msg, 'fragIdx', fragIdx);
+        end
+
+        function clearRelayFragmentAck(obj, leafID, ackMsg)
+            % 5.3 received for a fragment we relayed -- clear the matching
+            % pendingRelayFragments row.
+            if isempty(obj.pendingRelayFragments), return; end
+            fragIdx = 1;
+            if ackMsg.payloadLen >= 2
+                fragIdx = ackMsg.payload(2);
+            end
+            keep = ~(([obj.pendingRelayFragments.leafID] == leafID) & ...
+                     ([obj.pendingRelayFragments.fragIdx] == fragIdx));
+            obj.pendingRelayFragments = obj.pendingRelayFragments(keep);
+        end
+
+        function msgs = processRelayQueue(obj, t)
+            % Flush queued relayed data/fragments on this CH's own cadence,
+            % retry per-hop-unACKed fragments, and apply fairness so a busy
+            % latch is never permanently stuck only forwarding (guarantees
+            % >=1 local TX for every RELAY_LOCAL_TX_FAIRNESS relay TXs).
+            % Control/recruitment/priority traffic never passes through
+            % here -- it is always sent immediately from its own handler.
+            msgs = [];
+
+            % --- RETRY unACKed relayed fragments (per-hop reliability) ---
+            if ~isempty(obj.pendingRelayFragments)
+                stillPending = obj.pendingRelayFragments;
+                for i = 1:numel(stillPending)
+                    row = stillPending(i);
+                    if (t - row.lastRetryTime) < WSN_Config.RELAY_FRAG_RETRY_INTERVAL
+                        continue;
+                    end
+                    if row.retryCount >= WSN_Config.RELAY_FRAG_MAX_RETRIES
+                        obj.addLog(sprintf('t=%d [RELAY_FRAG_DROPPED] leaf=%s frag=%d after %d retries (next hop %s unresponsive)', ...
+                            t, dec2hex(uint16(row.leafID), 4), row.fragIdx, row.retryCount, dec2hex(uint16(row.nextHop), 4)));
+                        obj.pendingRelayFragments([obj.pendingRelayFragments.leafID] == row.leafID & ...
+                            [obj.pendingRelayFragments.fragIdx] == row.fragIdx) = [];
+                        continue;
+                    end
+                    msgs = [msgs, row.msg]; %#ok<AGROW>
+                    idx = find([obj.pendingRelayFragments.leafID] == row.leafID & ...
+                        [obj.pendingRelayFragments.fragIdx] == row.fragIdx, 1);
+                    if ~isempty(idx)
+                        obj.pendingRelayFragments(idx).retryCount = obj.pendingRelayFragments(idx).retryCount + 1;
+                        obj.pendingRelayFragments(idx).lastRetryTime = t;
+                    end
+                end
+            end
+
+            % --- FLUSH ONE QUEUED ITEM PER TICK, WITH LOCAL-TRAFFIC FAIRNESS ---
+            preferLocal = obj.localTxBudgetCounter >= WSN_Config.RELAY_LOCAL_TX_FAIRNESS;
+            haveLocalPending = ~isempty(obj.pendingAgg);
+            if preferLocal && haveLocalPending
+                % Defer to the existing sensor-aggregation pipeline this
+                % tick (it runs separately in step()); just reset the
+                % fairness counter so relay traffic resumes after.
+                obj.localTxBudgetCounter = 0;
+                return;
+            end
+
+            if ~isempty(obj.relayQueue)
+                item = obj.relayQueue{1};
+                obj.relayQueue(1) = [];
+
+                fwd = WSN_Message();
+                fwd.type = item.msg.type;
+                fwd.subtype = item.msg.subtype;
+                fwd.src = hex2dec(obj.hexID);
+                fwd.dst = item.nextHop;
+                fwd.originalSrc = item.msg.originalSrc;
+                fwd.ttl = item.msg.ttl;
+                fwd.seq = item.msg.seq;
+                fwd.flag = item.msg.flag;
+                fwd.payload = item.msg.payload;
+                fwd.payloadLen = item.msg.payloadLen;
+                fwd.addChecksum();
+                fwd.color = item.msg.color;
+
+                totalFrags = 1;
+                if item.msg.payloadLen >= 1
+                    totalFrags = item.msg.payload(1);
+                end
+                obj.pendingRelayFragments(end+1) = struct('leafID', item.leafID, ...
+                    'nextHop', item.nextHop, 'seq', fwd.seq, 'fragIdx', item.fragIdx, ...
+                    'totalFrags', totalFrags, 'msg', fwd, 'retryCount', 0, 'lastRetryTime', t);
+
+                msgs = [msgs, fwd]; %#ok<AGROW>
+                obj.localTxBudgetCounter = obj.localTxBudgetCounter + 1;
+                obj.addLog(sprintf('t=%d [RELAY_TX] leaf=%s frag=%d -> %s', ...
+                    t, dec2hex(uint16(item.leafID), 4), item.fragIdx, dec2hex(uint16(item.nextHop), 4)));
+            end
+        end
+
+        function checkChPeerDiscoveryDVS(obj, t)
+            % Verified, GWN-anchored CH periodically widens its own
+            % txPower footprint if its CH-child count has stalled, so a
+            % still-unverified peer CH further out can hear its HELLO and
+            % choose to send a CH_REQ. This is "appear in range" only --
+            % it never causes this CH to initiate anything; the judgement
+            % to pair still belongs entirely to the unverified peer's own
+            % SECURE-state FSM. See WSN_Config.CH_PEER_DVS_* comment for
+            % why this is deliberately more conservative than the GWN's
+            % equivalent (checkChDiscoveryDVS in WSN_Gateway.m).
+            if ~WSN_Config.CH_PEER_DVS_ENABLED, return; end
+            if ~obj.isVerified, return; end
+            if t < obj.chPeerDvsLastCheckTime + WSN_Config.CH_PEER_DVS_CHECK_INTERVAL
+                return;
+            end
+
+            currentCount = numel(obj.relayTable);
+            stalled = currentCount <= obj.chPeerDvsLastChildCount;
+
+            if stalled && obj.chPeerDvsScaleCount < WSN_Config.CH_PEER_DVS_MAX_SCALE_ATTEMPTS ...
+                    && obj.txPower < WSN_Config.MaxCHPeerPower
+                oldPower = obj.txPower;
+                obj.txPower = min(WSN_Config.MaxCHPeerPower, ...
+                    obj.txPower * WSN_Config.CH_PEER_DVS_SCALE_FACTOR);
+                obj.chPeerDvsScaleCount = obj.chPeerDvsScaleCount + 1;
+                obj.addLog(sprintf('t=%d [CH_PEER_DVS] No new CH child since t=%d -- txPower %.2f -> %.2f (attempt %d/%d)', ...
+                    t, obj.chPeerDvsLastCheckTime, oldPower, obj.txPower, ...
+                    obj.chPeerDvsScaleCount, WSN_Config.CH_PEER_DVS_MAX_SCALE_ATTEMPTS));
+            elseif ~stalled && obj.txPower > WSN_Config.TxPower_CH
+                oldPower = obj.txPower;
+                obj.txPower = WSN_Config.TxPower_CH;
+                obj.chPeerDvsScaleCount = 0;
+                obj.addLog(sprintf('t=%d [CH_PEER_DVS] New CH child found -- txPower reset %.2f -> %.2f (budget refreshed)', ...
+                    t, oldPower, obj.txPower));
+            end
+
+            obj.chPeerDvsLastCheckTime = t;
+            obj.chPeerDvsLastChildCount = currentCount;
+        end
+
+        function checkChOrphanDVS(obj, t)
+            % Last-resort: a CH still unverified this far into the run
+            % widens its OWN footprint so a distant verified GWN/CH's
+            % normal HELLO range overlap is more likely, rather than
+            % waiting indefinitely on someone else's DVS boost to reach
+            % it. Still passive discovery only (boosts HELLO broadcast
+            % range) -- once a verified candidate lands in neighborTable,
+            % the existing SECURE-state FSM (findBestVerifiedGWN/CH,
+            % CH_REQ, CH_MAX_RETRIES, retryBackoff) drives the actual
+            % connection-request initiation and retries exactly as it
+            % already does for any other candidate.
+            if ~WSN_Config.CH_ORPHAN_DVS_ENABLED, return; end
+            if t < WSN_Config.CH_ORPHAN_DVS_START_TIME, return; end
+            if obj.isVerified, return; end
+            if t < obj.chOrphanDvsLastCheckTime + WSN_Config.CH_ORPHAN_DVS_CHECK_INTERVAL
+                return;
+            end
+
+            if obj.chOrphanDvsScaleCount < WSN_Config.CH_ORPHAN_DVS_MAX_SCALE_ATTEMPTS ...
+                    && obj.txPower < WSN_Config.MaxCHOrphanPower
+                oldPower = obj.txPower;
+                obj.txPower = min(WSN_Config.MaxCHOrphanPower, ...
+                    obj.txPower * WSN_Config.CH_ORPHAN_DVS_SCALE_FACTOR);
+                obj.chOrphanDvsScaleCount = obj.chOrphanDvsScaleCount + 1;
+                obj.addLog(sprintf('t=%d [CH_ORPHAN_DVS] Still unverified past t=%d -- txPower %.2f -> %.2f (attempt %d/%d)', ...
+                    t, WSN_Config.CH_ORPHAN_DVS_START_TIME, oldPower, obj.txPower, ...
+                    obj.chOrphanDvsScaleCount, WSN_Config.CH_ORPHAN_DVS_MAX_SCALE_ATTEMPTS));
+            end
+
+            obj.chOrphanDvsLastCheckTime = t;
+        end
+
         function target = findBestVerifiedGWN(obj)
             % Find closest verified GWN not in rejected list
             target = [];
@@ -608,12 +974,15 @@ classdef WSN_ClusterHead < WSN_Node
         end
         
         function msg = createCHREQ(obj, dst, t)
-            % Create 6.0 CH_REQ message
+            % Create 6.0 CH_REQ message. originalSrc = own ID -- this is
+            % always the leaf at the point of creation (relays preserve it
+            % unchanged when forwarding, see handleCHREQ).
             msg = WSN_Message();
             msg.type = WSN_Config.MSG_TYPE_CH_CMD;
             msg.subtype = WSN_Config.CH_SUB_REQ;  % 0
             msg.src = hex2dec(obj.hexID);
             msg.dst = dst;
+            msg.originalSrc = hex2dec(obj.hexID);
             msg.ttl = 1;
             msg.seq = mod(t, 256);
             msg.flag = 0;
@@ -621,30 +990,43 @@ classdef WSN_ClusterHead < WSN_Node
             msg.payload = [];
             msg.addChecksum();
         end
-        
+
         function msg = createKEY_ACK(obj, dst, t)
-            % Create 6.2 KEY_ACK message (encrypted in local key)
+            % Create 6.2 KEY_ACK message (encrypted in local key). The
+            % passkey is appended as the last payload byte BEFORE encryption
+            % (i.e. it's inside the same encrypted envelope as the key echo),
+            % per spec. originalSrc = own ID so a multi-hop reverse path back
+            % to the GWN can route it even though wire dst is just the next
+            % hop.
             msg = WSN_Message();
             msg.type = WSN_Config.MSG_TYPE_CH_CMD;
             msg.subtype = WSN_Config.CH_SUB_KEY_ACK;  % 2
             msg.src = hex2dec(obj.hexID);
             msg.dst = dst;
+            msg.originalSrc = hex2dec(obj.hexID);
             msg.ttl = 1;
             msg.seq = mod(t, 256);
             msg.flag = bitset(0, 1, 1);  % Encrypted flag
-            % Payload: simple ACK (could add more data)
-            msg.payload = obj.localKey;  % Echo key as confirmation
+            % Payload: echoed key + appended passkey (confirmation)
+            msg.payload = [obj.localKey(:)', uint8(obj.passkey)];
             msg.payloadLen = numel(msg.payload);
             msg.addChecksum();
         end
-        
-        function msg = createCHREJECT(obj, dst, t)
-            % Create 6.3 CH_REJECT message
+
+        function msg = createCHREJECT(obj, dst, t, leafID)
+            % Create 6.3 CH_REJECT message. leafID (optional) is the true
+            % identity being rejected when this rejection is itself a reply
+            % to a relayed CH_REQ -- defaults to dst (hop-local rejection,
+            % no relay involved) when omitted.
+            if nargin < 4 || isempty(leafID)
+                leafID = dst;
+            end
             msg = WSN_Message();
             msg.type = WSN_Config.MSG_TYPE_CH_CMD;
             msg.subtype = WSN_Config.CH_SUB_REJECT;  % 3
             msg.src = hex2dec(obj.hexID);
             msg.dst = dst;
+            msg.originalSrc = leafID;
             msg.ttl = 1;
             msg.seq = mod(t, 256);
             msg.flag = 0;
@@ -669,28 +1051,36 @@ classdef WSN_ClusterHead < WSN_Node
         end
         
         function msg = createCHINFO(obj, recruitedID, t)
-            % Create 6.5 CH_INFO message to parent
-            % Payload: {Recruited CH ID, Parent CH ID} encrypted if local key available
+            % Create 6.5 CH_INFO: hop-by-hop relay-topology announcement.
+            % Sent fresh by a latch the moment it accepts a new relay
+            % (handleCHREQ), and relayed one hop further by every subsequent
+            % latch on the path (see relayMessageIfNotMine) so GWN/Sink/
+            % ML-IDS/GUI keep accurate path visibility even though the
+            % actual data/handshake path stays transparent. originalSrc =
+            % the leaf this announcement is about.
+            % Payload: {Recruited/leaf CH ID, Parent CH ID} + appended
+            % passkey (if available), encrypted if local key available.
             msg = WSN_Message();
             msg.type = WSN_Config.MSG_TYPE_CH_CMD;
             msg.subtype = WSN_Config.CH_SUB_INFO;  % 5
             msg.src = hex2dec(obj.hexID);
             msg.dst = obj.parent;
+            msg.originalSrc = recruitedID;
             msg.ttl = 1;
             msg.seq = mod(t, 256);
-            
-            % Payload: Recruited ID (2), Parent ID (2)
-            plainPayload = [typecast(uint16(recruitedID), 'uint8'), ...
-                            typecast(uint16(hex2dec(obj.hexID)), 'uint8')];
-            
-            % Encrypt with local key if available
-            if ~isempty(obj.localKey)
-                msg.payload = obj.encryptPayload(plainPayload, obj.localKey);
-                msg.flag = bitset(0, 1, 1);  % Encrypted flag
-            else
-                msg.payload = plainPayload;
-                msg.flag = 0;  % Not encrypted
-            end
+
+            % Payload: Recruited/leaf ID (2), immediate-latch ID (2).
+            % Deliberately UNENCRYPTED: unlike the old one-hop model, a 6.5
+            % announcement may now cross multiple relay hops verbatim before
+            % reaching the GWN (relayMessageIfNotMine never re-encrypts), so
+            % there is no single "the sender's localKey" the GWN could
+            % reliably decrypt it with once it's been relayed past its
+            % originating latch. CH_INFO is a visibility-only side-channel
+            % (registries/ML-IDS/GUI) -- the security-critical exchange is
+            % the real KEY_ACK/passkey handshake per leaf, unaffected by this.
+            msg.payload = [typecast(uint16(recruitedID), 'uint8'), ...
+                           typecast(uint16(hex2dec(obj.hexID)), 'uint8')];
+            msg.flag = 0;
             msg.payloadLen = numel(msg.payload);
             msg.addChecksum();
         end

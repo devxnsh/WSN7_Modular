@@ -298,18 +298,25 @@ symptoms:
    candidates if its current target rejects/times out, cycling through
    `valid` neighbors - it is not "locked onto one candidate forever," just
    capped at one *successful* child.)
-2. **CH-CH chaining is capped at exactly one hop**
-   (`CH/WSN_ClusterHead.m:15,418,480`: `isQualifiedToRecruit` is only ever
-   `true` for a GWN-anchored CH; a CH that itself joined via another CH is
-   never qualified to recruit further). A center-of-topology CH that is
-   more than one CH-CH hop *and* out of direct/DVS-boosted GWN range from
-   any GWN-anchored CH has no path into the network - this is a genuine
-   radio-range/topology limitation given the one-hop cap, not a timing bug.
+2. ~~**CH-CH chaining is capped at exactly one hop**~~ **REMOVED
+   (2026-06-22)**. `isQualifiedToRecruit` no longer exists; every verified
+   CH can now transparently relay/latch for further CHs at unbounded depth
+   (`CH/WSN_ClusterHead.m` `handleCHREQ`/`relayMessageIfNotMine`, see
+   `CH_Documentation.md` §9 for the full design). A center-of-topology CH
+   that is out of range of every GWN and every GWN-anchored CH is no longer
+   structurally unreachable — it just needs to be in range of **any**
+   verified CH, which relays it to the GWN at whatever depth that takes.
+   `checkChPeerDiscoveryDVS`/`checkChOrphanDVS` (`WSN_Config.CH_PEER_DVS_*`/
+   `CH_ORPHAN_DVS_*`, see `CH_Documentation.md` §8) still widen who's
+   *discoverable*; relay now extends how far being discoverable by *any*
+   verified CH actually reaches. The residual failure mode is now purely
+   "out of HELLO range of every verified node in the network," not "out of
+   range of specifically a GWN or GWN-anchored CH" — a strictly smaller
+   dead zone.
 
-Both are deliberate stability choices (an unbounded relay-chain depth would
-risk cascading failures and was explicitly capped per the existing
-`isQualifiedToRecruit` comment). Ripping out either cap is a network-design
-change, not a bug fix, and was not done here without that explicit ask.
+Constraint 1 (one child per non-Sink GWN) remains a deliberate stability
+choice and is unaffected by this change — it's a separate axis (GWN-GWN
+backbone fan-out) from CH-CH relay depth.
 
 **Mechanisms that were checked and found to already work correctly** (so
 they are *not* the explanation, despite being plausible candidates):
@@ -333,3 +340,82 @@ pauses during a lock. Checked against the actual configured values
 be purged, so in the current configuration this does not contribute to
 unconnected segments. Flagging for completeness in case `HandshakeTimeout`
 is ever tuned much larger relative to `HelloInterval`.
+
+---
+
+## Follow-up pass (2026-06-22): real ring-segmentation bug found and fixed
+
+A later request to re-investigate "GWN-GWN ring segmentation" and
+"unreached center CHs" against an actual long-running sim (~2500 ticks,
+`logs/combined_t0-2500_20260622_013723.csv`) found and fixed a genuine,
+previously-undocumented bug distinct from everything above - this one
+**does** explain real, observed asymmetric parent/child state, confirmed
+directly from log evidence rather than code-reading alone.
+
+### Bug: asymmetric GWN-GWN parent/child loss via false-positive dead-neighbor purge
+
+**Symptom, confirmed in logs**: GWN `FF06` and `FF0A` formed a normal
+backbone parent/child link (`FF06.parent = FF0A`), with healthy steady-state
+traffic (`FF06` forwarding `5.2`/`CH_HELLO` to `FF0A` every few ticks,
+periodic `ENC_HELLO` registry refreshes succeeding through t=2266). At
+t=2280, `FF06` logged `[CRITICAL] Parent lost` and cleared its own
+`gw.parent` - **despite `FF0A` having received traffic from `FF06` only 8
+ticks earlier** (t=2272). `FF0A` was never told and kept reporting
+`gwCh=[FF06]` in its own `ENC_HELLO` to the Sink as late as t=2497 - the
+exact backbone-children-table vs. backbone-parent-field asymmetry visible
+live in the GUI's Network State table.
+
+**Root cause** (three compounding facts, all confirmed by reading the
+code): the `[CRITICAL] Parent lost` log has exactly one source -
+`WSN_Gateway_Behavior.m:116-141`'s dead-neighbor purge, which clears
+`gw.parent` once `neighborTable(idx).lastSeen < t - 3*WSN_Config.HelloInterval`
+(1500 ticks). But:
+1. Once a GWN is verified, it stops sending Type-0 HELLO (only sent
+   pre-SECURE, `WSN_Gateway_Behavior.m:316-321`) - so the *only* thing that
+   refreshed `neighborTable.lastSeen` post-handshake was Type-9 `ENC_HB`,
+   sent once per `WSN_Config.HelloInterval` = **500** ticks
+   (`WSN_Gateway_Behavior.m:207-210`). The steady-state backbone traffic
+   that actually proves a link is alive - `CH_HELLO`/`SENSOR_AGG` relay
+   (Type 5: `handle_CH_HELLO`/`handle_SENSOR_AGG`), `ENC_HELLO`
+   (`handle_ENC_HELLO`), and the rest of the Type-7 CMD family - never
+   touched `neighborTable` at all.
+2. `WSN_Radio.getPriority` (`Utils/WSN_Radio.m:276-290`) ranks Type-9 HB as
+   the **lowest**-priority backbone message (`p=20`, below CMD=50,
+   TOKEN=40, CH_HELLO=30), and each radio has only a single `pendingRX`
+   slot per tick (`WSN_Radio.m:76-103`, `pushRX`) - a higher-priority
+   message arriving the same tick silently evicts a pending heartbeat with
+   no retry/buffering.
+3. The purge is one-sided: the side that loses its heartbeat clears its own
+   `gw.parent` and has no live link left to notify the other side - so the
+   other side's `children`/neighbor entry for it goes stale on its own
+   separate, independent clock.
+
+Combined: a node whose rare 500-tick heartbeat keeps losing the single-slot
+RX arbitration (more likely on a busy node fielding more concurrent
+neighbor/CH traffic, e.g. `FF06` with an active CH child) can accumulate
+1500+ idle ticks in `neighborTable` *despite the link being demonstrably
+alive via other traffic the whole time*, and self-purge a perfectly healthy
+parent - asymmetrically, since the other side's clock runs independently.
+This is also the most evidence-backed explanation on record for
+busier/higher-degree (i.e. more central) backbone nodes disproportionately
+losing the very link a center CH's data depends on, even though the CH-tier
+relay itself is unaffected.
+
+**Fix** (`GWN/WSN_Gateway_Messaging.m`): added `touchNeighborLiveness(sender,
+t)`, called from `handleReceive` at the three points where backbone traffic
+from a known neighbor arrives without ever refreshing `neighborTable`: the
+"UNIVERSAL BACKBONE RELAY" early-return branch (encrypted child traffic),
+the Type-5 `CH_HELLO` dispatch branch, and right after the generic Type-7
+CMD unicast-to-self check (covers `PARENT_INIT`/`REQ_JOIN`/`ACK_JOIN`/
+`GLOBAL_KEY`/`ENC_HELLO`). Any already-known neighbor sending valid traffic
+now counts as proof of life, not just the rare, low-priority heartbeat -
+this doesn't touch handshake/security logic, only liveness bookkeeping.
+
+**Verification**: `WSN_Gateway_Messaging` parses via `meta.class.fromName`;
+a 600-step headless regression (`WSN_Main(1e9, 100, [], 600)`,
+`ActivateAttacks=false`) completes cleanly with zero `Parent lost` events
+and 33 successful `ENC_HELLO` confirmations in the exported log, vs. the
+pre-fix ~2500-tick run that produced the `FF06`/`FF0A` asymmetry above
+(600 ticks is too short to exercise the 1500-tick purge window directly,
+so this confirms no regression in normal formation rather than directly
+reproducing the now-fixed purge).

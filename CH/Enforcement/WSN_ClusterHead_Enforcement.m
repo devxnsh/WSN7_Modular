@@ -194,8 +194,11 @@ classdef WSN_ClusterHead_Enforcement
                 case WSN_Config.SHUTDOWN_HARD_RESET
                     obj.parent = [];
                     obj.isVerified = false;
-                    obj.isQualifiedToRecruit = false;
                     obj.localKey = [];
+                    obj.passkey = [];
+                    obj.relayTable = struct('leafID',{}, 'nextHop',{}, 'lastActive',{});
+                    obj.relayQueue = {};
+                    obj.pendingRelayFragments = struct('leafID',{}, 'nextHop',{}, 'seq',{}, 'fragIdx',{}, 'totalFrags',{}, 'msg',{}, 'retryCount',{}, 'lastRetryTime',{});
                     obj.state = WSN_Config.STATE_BOOT;
                     obj.neighborTrust = struct('id',{}, 'score',{});
                     obj.addLog(sprintf('t=%d [SHUTDOWN] HARD_RESET - forced re-handshake', t));

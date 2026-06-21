@@ -42,9 +42,15 @@
         logAccess = {}     % HC12 access radio logs
         
         % -------- CH CHILDREN (separate from GWN children) --------
+        % Unlike the single-child-slot GWN-GWN backbone (one parent, one
+        % child, see WSN_Gateway_Behavior.m), this is an array: a GWN
+        % accepts a CH_REQ from any CH that pairs with it (handleCHREQ has
+        % no child-count cap), so one GWN can recruit multiple CHs if
+        % multiple appropriate CH_REQ pairing requests arrive.
         chChildren = []          % List of recruited (first-degree) CH IDs
         secondaryChChildren = [] % CH IDs learned about via a relay-CH's CH_INFO (not direct children)
         chLocalKeys = containers.Map()  % Map of CH hexID to local key
+        chPasskeys = containers.Map()   % Map of CH hexID to 5-bit verification passkey (issued alongside localKey, see WSN_Config.CH_PASSKEY_MAX)
 
         % --- CH REGISTRATION ANNOUNCE-TO-BACKBONE TRACKING ---
         % Notifying the Sink of a CH child (direct or secondary) used to be
@@ -300,6 +306,11 @@
             % reach further out to distant/orphaned CHs. See property
             % comment above chDvsLastCheckTime for rationale.
             if ~WSN_Config.GWN_CH_DVS_ENABLED, return; end
+            % Only a GWN that is itself verified (has a confirmed backbone
+            % path toward the Sink) spends access-radio budget recruiting
+            % CHs -- an unverified GWN has nowhere to forward a recruit's
+            % data yet, so boosting controlPower here would be wasted spend.
+            if ~obj.isVerified, return; end
             if t < obj.chDvsLastCheckTime + WSN_Config.GWN_CH_DVS_CHECK_INTERVAL
                 return;
             end

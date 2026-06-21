@@ -147,24 +147,116 @@ classdef WSN_Config
         CH_SUB_ACK = 1;      % 6.1 CH_ACK: GWN→CH with local key
         CH_SUB_KEY_ACK = 2;  % 6.2 KEY_ACK: CH→GWN encrypted confirmation
         CH_SUB_REJECT = 3;   % 6.3 CH_REJECT: GWN→CH rejection
-        CH_SUB_JOINOK = 4;   % 6.4 CH_JOINOK: CH→CH join acceptance
-        CH_SUB_INFO = 5;     % 6.5 CH_INFO: Parent CH→GWN with recruited CH info
+        CH_SUB_JOINOK = 4;   % 6.4 CH_JOINOK: hop-local "I will relay/latch for you" ack (immediate, between adjacent CHs only -- NOT end-to-end verification)
+        CH_SUB_INFO = 5;     % 6.5 CH_INFO: hop-by-hop relay-topology announcement, relayed one hop further by every latch so GWN/Sink/ML-IDS/GUI keep accurate path visibility
         
         % --- CH RECRUITMENT TIMING ---
-        CH_ACCESS_LOCK_TIMER = 4;   % Access radio lock duration for CH handshake
+        % CH_ACCESS_LOCK_TIMER was 4 TFs when CH-CH was capped at one hop.
+        % Under the relay-latch model (see CH_REQ relay logic in
+        % WSN_ClusterHead.m) a handshake may now cross an arbitrary number of
+        % hops, each adding its own per-hop transmit latency (WSN_Radio
+        % defers actual TX to the next tick) -- 4 TFs is not enough budget for
+        % a multi-hop round trip. Each relay hop also sends an immediate
+        % CH_SUB_JOINOK (6.4) hop-local ack the instant it accepts the relay
+        % role, which the requester treats as a lock-timer refresh so it does
+        % not time out while the far end of the chain is still working.
+        CH_ACCESS_LOCK_TIMER = 16;  % Access radio lock duration for CH handshake (was 4; relay-aware)
         CH_MAX_RETRIES = 5;         % Max retries per GWN for any CH
-        CH_REJECTED_LIST_RESET_INTERVAL = 40;  % Ticks before forgiving old rejections/timeouts
+        % MUST exceed CH_MAX_RETRIES * CH_ACCESS_LOCK_TIMER (worst case to
+        % exhaust all retries against one unreachable target, ~80 TFs at
+        % current values). When this was 60 (< 80), a target that had just
+        % been added to rejectedGWNs/rejectedCHs after MAX_RETRIES got
+        % forgiven before the CH's recruitment FSM ever got a tick to act on
+        % the rejection -- findBestVerifiedGWN/findBestVerifiedCH would
+        % re-select the SAME unreachable target on the very next attempt
+        % instead of ever falling back to an alternative (e.g. a relay-
+        % capable CH neighbor), so an asymmetric-range CH (can hear a GWN's
+        % HELLO but its own much weaker CH_REQ never physically reaches
+        % back, see WSN_Physics sender-based range) would retry that one
+        % broken target forever and never get recruited. Confirmed via
+        % simulation logs: CHs stuck cycling CH_REQ -> TIMEOUT against the
+        % same GWN past t=2500 with zero alternate attempts. 150 TFs gives
+        % the FSM a real window to try other candidates before an
+        % unreachable target is reconsidered, while still comfortably
+        % fitting multiple retry cycles within a ~1000 TF setup budget.
+        CH_REJECTED_LIST_RESET_INTERVAL = 150;  % Ticks before forgiving old rejections/timeouts (was 60, then 40)
+
+        % --- CH RELAY/LATCH (transparent multi-hop CH-CH relay) ---
+        % Replaces the old one-hop CH-CH cap entirely: any verified CH can
+        % now relay an arbitrary-depth chain of further CHs up to the GWN,
+        % acting as a transparent "latch" (see WSN_ClusterHead.handleCHREQ /
+        % relayMessageIfNotMine). Reuses existing message types/subtypes
+        % (6.0/6.1/6.2/6.3 unchanged in format; 6.4/6.5 repurposed) -- see
+        % CH_Documentation.md for the full mapping.
+        CH_PASSKEY_MAX = 31;          % 5-bit per-child verification passkey (0-31), issued by GWN alongside localKey
+        RELAY_QUEUE_MAX = 20;         % Max queued data/fragment messages a latch holds per hop
+        RELAY_FRAG_RETRY_INTERVAL = 3;   % Per-hop fragment retry interval (mirrors AGG_RETRY_INTERVAL)
+        RELAY_FRAG_MAX_RETRIES = 3;      % Per-hop fragment max retries before that hop's link is treated as dead
+        RELAY_LOCAL_TX_FAIRNESS = 4;  % Guarantee >=1 local TX for every N relay TXs, so a busy latch is never permanently stuck only forwarding
 
         % --- GWN CH-DISCOVERY DYNAMIC VOLTAGE SCALING (DVS) ---
-        % Moved from the old CH-side DVS (IDS_METRICS_IMPROVEMENT_PLAN.md):
-        % GWNs, not power-constrained CHs, now do the power-scaling to
-        % extend discovery range to distant/orphaned CHs. Reuses
-        % MaxGWNPower as the cap, consistent with the existing GWN-GWN
-        % backbone DVS in WSN_Gateway_Behavior.m.
+        % GWNs do the bulk of the power-scaling to extend discovery range to
+        % distant/orphaned CHs, since they are not battery-constrained the
+        % way CHs are (continuous charging circuit, see updatePhysics).
+        % Reuses MaxGWNPower as the cap, consistent with the existing
+        % GWN-GWN backbone DVS in WSN_Gateway_Behavior.m. Gated on the GWN's
+        % OWN verification (WSN_Gateway.checkChDiscoveryDVS) so an
+        % unverified GWN never spends its access-radio budget before it has
+        % a backbone path to the Sink itself.
         GWN_CH_DVS_ENABLED = true;          % Enable CH-discovery power scaling
         GWN_CH_DVS_CHECK_INTERVAL = 50;     % Ticks between stall checks
         GWN_CH_DVS_SCALE_FACTOR = 1.2;      % controlPower multiplier on scale-up
         GWN_CH_DVS_MAX_SCALE_ATTEMPTS = 5;  % Max scale-ups (controlPower capped at MaxGWNPower regardless)
+
+        % --- CH PEER-DISCOVERY DVS (verified CH widens its own HELLO
+        % footprint so a still-unverified peer CH can hear it) ---
+        % This is the CH-side counterpart to GWN_CH_DVS above: a verified CH
+        % scales ITS OWN txPower when its CH-child count has stalled. Used to
+        % be gated on isQualifiedToRecruit (one-hop cap); now that the
+        % relay-latch model (WSN_ClusterHead.handleCHREQ) lets ANY verified
+        % CH recruit further CHs at unbounded depth, this gates on isVerified
+        % alone. DVS is now a slower-acting BACKSTOP rather than the primary
+        % connectivity mechanism, since relay chains do most of the work of
+        % reaching distant/orphaned CHs passively (see CH_Documentation.md
+        % propagation-analysis section) -- cadence/step/cap were loosened
+        % accordingly vs. the pre-relay tuning.
+        % Deliberately MORE conservative than GWN_CH_DVS (slower cadence,
+        % smaller step, lower attempt budget, lower relative cap) because a
+        % CH runs on a single non-charging battery (WSN_ClusterHead.
+        % updatePhysics has no charging circuit, unlike WSN_Gateway's).
+        % Like GWN_CH_DVS this only widens the broadcast/HELLO footprint
+        % ("appear in range") -- it never causes the verified CH to initiate
+        % a connection itself; the unverified peer CH still makes its own
+        % join decision via its normal SECURE-state FSM.
+        CH_PEER_DVS_ENABLED = true;
+        CH_PEER_DVS_CHECK_INTERVAL = 110;      % Slower than the pre-relay 80 (relay now does more of the work)
+        CH_PEER_DVS_SCALE_FACTOR = 1.07;       % Gentler than the pre-relay 1.1
+        CH_PEER_DVS_MAX_SCALE_ATTEMPTS = 2;    % Fewer than the pre-relay 3
+        MaxCHPeerPower = 3.0;                  % Cap = 1.5x TxPower_CH baseline (GWN caps at 2x baseline)
+
+        % --- CH ORPHAN-RESCUE DVS (still-unverified CH past t=600 widens its
+        % own footprint to discover ANY verified GWN or CH) ---
+        % Last-resort mechanism: every other DVS path above is "passive"
+        % (only ever boosts an already-verified node's footprint). If a CH
+        % is still unverified this far into the run, the normal recruitment
+        % FSM (findBestVerifiedGWN/findBestVerifiedCH, CH_MAX_RETRIES,
+        % retryBackoff) AND the relay-latch path (any verified CH neighbor
+        % can now relay it in) have had ample time to work and the CH is
+        % clearly starved of visible candidates rather than being rejected --
+        % so here the UNVERIFIED node itself widens its footprint instead of
+        % waiting on someone else's boost. Discovery (this constant) only
+        % ever widens the HELLO broadcast range; the existing SECURE-state
+        % FSM still owns the actual CH_REQ initiation/retry decision once a
+        % verified candidate appears in neighborTable -- this DVS step does
+        % not skip or replace that handshake, it only makes it reachable
+        % sooner. With relay chains now covering most of the topology gap
+        % this used to compensate for, this is tuned slower than before too.
+        CH_ORPHAN_DVS_ENABLED = true;
+        CH_ORPHAN_DVS_START_TIME = 600;        % Matches the t=600 threshold
+        CH_ORPHAN_DVS_CHECK_INTERVAL = 55;     % Slower than the pre-relay 40
+        CH_ORPHAN_DVS_SCALE_FACTOR = 1.1;      % Gentler than the pre-relay 1.15
+        CH_ORPHAN_DVS_MAX_SCALE_ATTEMPTS = 3;  % Fewer than the pre-relay 4
+        MaxCHOrphanPower = 3.6;                % Cap = 1.8x TxPower_CH baseline
 
         % --- SENSOR ORPHAN SLEEP MODE ---
         SENSOR_ORPHAN_SLEEP_FACTOR = 0.75;  % 75% longer sleep when orphaned

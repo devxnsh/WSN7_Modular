@@ -166,10 +166,34 @@ classdef WSN_Gateway_Messaging < handle
     % HANDLE RECEIVE → ACTIONS
     % =========================================================
     methods
+        function touchNeighborLiveness(obj, sender, t)
+            % Any valid backbone traffic from a node already in our
+            % neighborTable proves it is alive right now. Before this fix,
+            % only Type 0 HELLO (pre-verified only) and Type 9 ENC_HB
+            % (once per WSN_Config.HelloInterval=500 ticks, and LOWEST
+            % priority on the backbone radio per WSN_Radio.getPriority, so
+            % first to lose single-pendingRX-slot arbitration on busy
+            % nodes) ever refreshed lastSeen. Steady-state backbone traffic
+            % (CH_HELLO/SENSOR_AGG relay, ENC_HELLO, CMD handshake) never
+            % touched it, so an actively-communicating parent/child link
+            % could still be force-purged as "dead" by the
+            % 3*HelloInterval staleness check in WSN_Gateway_Behavior.step
+            % purely because its rare heartbeat got arbitrated away -
+            % asymmetrically, since only the side that loses the
+            % heartbeat clears its own gw.parent/children, with no way to
+            % notify a peer it now believes is unreachable.
+            gw = obj.gw;
+            if isempty(gw.neighborTable), return; end
+            idx = find([gw.neighborTable.id] == sender, 1);
+            if ~isempty(idx)
+                gw.neighborTable(idx).lastSeen = t;
+            end
+        end
+
         function actions = handleReceive(obj, msg, t, rssi)
             actions = {};
             gw = obj.gw;
-            
+
             % === ATTACK: BLACKHOLE/GRAYHOLE CHECK ===
             % Malicious GWN may drop messages instead of forwarding
             if WSN_Attack.isMaliciousNode(gw.id)
@@ -208,6 +232,7 @@ classdef WSN_Gateway_Messaging < handle
                 if ~msg.verifyChecksum()
                     return;
                 end
+                obj.touchNeighborLiveness(msg.src, t);
 
                 % Log reception
                 gw.addLogBackbone(sprintf('t=%d [RX_FWD] Encrypted %s.%d from Child %s -> Queue for Parent %s', ...
@@ -284,6 +309,7 @@ classdef WSN_Gateway_Messaging < handle
                 if ~msg.verifyChecksum()
                     return;
                 end
+                obj.touchNeighborLiveness(msg.src, t);
                 % Log to Backbone log (routing message)
                 gw.addLogBackbone(sprintf('t=%d [RX] CH_HELLO <- %s', ...
                     t, gw.fmtID(msg.src)), msg, t);
@@ -336,7 +362,10 @@ classdef WSN_Gateway_Messaging < handle
             if msg.type ~= 7 || msg.dst ~= hex2dec(gw.hexID)
                 return;
             end
-            
+
+            % Any unicast CMD frame from a known neighbor proves it's alive
+            obj.touchNeighborLiveness(msg.src, t);
+
             % Lock handling based on subtype:
             % 7.0 (PARENT_INIT): CREATES lock (handled in handler)
             % 7.1, 7.2, 7.4: REFRESH lock
@@ -873,19 +902,25 @@ classdef WSN_Gateway_Messaging < handle
             actions = {};
             gw = obj.gw;
             sender = msg.src;
-            
+            leafID = msg.originalSrc;
+            if leafID == 0, leafID = sender; end
+
             % Parse and store sensor data locally
             obj.mergeSensorAgg(msg, t);
 
-            % ML-IDS: record this CH's report arrival (silence detector,
-            % ML_IDS_PLAN.md Phase 4 follow-up) and clear any prior flag
-            idx = find([gw.chLastAggSeen.id] == sender, 1);
+            % ML-IDS: record the TRUE leaf CH's report arrival (silence
+            % detector, ML_IDS_PLAN.md Phase 4 follow-up) -- tracking by
+            % msg.src here would attribute reports to whichever latch
+            % happened to deliver the last hop instead of the actual
+            % reporting CH, making silence detection meaningless under
+            % relay. Clear any prior flag for the true leaf.
+            idx = find([gw.chLastAggSeen.id] == leafID, 1);
             if isempty(idx)
-                gw.chLastAggSeen(end+1) = struct('id', sender, 'lastTime', t);
+                gw.chLastAggSeen(end+1) = struct('id', leafID, 'lastTime', t);
             else
                 gw.chLastAggSeen(idx).lastTime = t;
             end
-            gw.chAggSilenceFlagged = setdiff(gw.chAggSilenceFlagged, sender);
+            gw.chAggSilenceFlagged = setdiff(gw.chAggSilenceFlagged, leafID);
 
             % Sink handles 5.2 via override - no forwarding needed
             if isa(gw, 'WSN_Sink')
@@ -1003,13 +1038,21 @@ classdef WSN_Gateway_Messaging < handle
             % CH/FeatureExport/WSN_ClusterHead_FeatureExport.m):
             % [TotalFrags(1), FragIdx(1), NumSensors(1), {SensorData} x N]
             % CH->GWN links are always encrypted with the per-CH localKey
-            % GWN issued during handshake (CH.localKey is non-empty iff
-            % CH's parent is a GWN) - must decrypt before parsing.
+            % GWN issued during handshake. The key is registered under the
+            % TRUE leaf identity (msg.originalSrc), not msg.src -- a
+            % transparently-relayed 5.2 may arrive with msg.src being some
+            % unrelated latch CH that just forwarded the bytes unchanged
+            % (see CH/WSN_ClusterHead.m relayMessageIfNotMine), so looking
+            % the key up by msg.src would fail/decrypt-with-the-wrong-key
+            % for any relayed leaf. originalSrc falls back to msg.src for a
+            % direct (non-relayed) CH, where they're the same.
             gw = obj.gw;
+            leafID = msg.originalSrc;
+            if leafID == 0, leafID = msg.src; end
 
             payload = msg.payload;
             if msg.isEncrypted()
-                localKey = obj.getLocalKeyForCH(msg.src);
+                localKey = obj.getLocalKeyForCH(leafID);
                 if isempty(localKey)
                     return;  % Unknown CH - can't decrypt, drop
                 end
@@ -1431,81 +1474,120 @@ classdef WSN_Gateway_Messaging < handle
         end
         
         function actions = handle_CH_REQ(obj, msg, t)
-            % 6.0 CH_REQ: CH wants to join this GWN
-            % Response: 6.1 CH_ACK with local key OR 6.3 CH_REJECT
+            % 6.0 CH_REQ: a CH wants to join this GWN -- possibly relayed
+            % through an arbitrary chain of latch CHs (replaces the old
+            % one-hop CH-CH cap). msg.originalSrc carries the TRUE requester
+            % identity regardless of how many hops it crossed; msg.src is
+            % just the immediate physical neighbor that delivered it (could
+            % be the requester itself, or the last latch in the chain). This
+            % GWN verifies+keys the true identity directly and is oblivious
+            % to the relay, per spec.
+            % Response: 6.1 CH_ACK with local key+passkey OR 6.3 CH_REJECT
             actions = {};
             gw = obj.gw;
             sender = msg.src;
-            
+            leafID = msg.originalSrc;
+            if leafID == 0, leafID = sender; end
+
             % Must be verified GWN to accept CH
             if ~gw.isVerified
                 gw.addLogAccess(sprintf('t=%d [CH_REJECT] %s (GWN not verified)', ...
                     t, dec2hex(uint16(sender), 4)), [], t);
                 actions{end+1} = struct('type', 'RESP', 'msg', ...
-                    obj.createCHReject(sender, t));
+                    obj.createCHReject(sender, t, leafID));
                 return;
             end
-            
-            % Check if already locked with another partner (Access radio)
+
+            % Check if already locked with another partner (Access radio).
+            % NOTE: the Access radio still serializes one handshake at a
+            % time (direct or relayed) -- a deliberate scope limit, not a
+            % bug: building a per-leaf lock table was out of scope for this
+            % change. A latch can still relay for many already-verified
+            % leaves concurrently; this only throttles brand-new joins.
             if ~isempty(gw.radioAccess.handshakePartner) && gw.radioAccess.handshakePartner ~= sender
                 gw.addLogAccess(sprintf('t=%d [CH_REJECT] %s (Access locked with %s)', ...
                     t, dec2hex(uint16(sender), 4), dec2hex(uint16(gw.radioAccess.handshakePartner), 4)), [], t);
                 actions{end+1} = struct('type', 'RESP', 'msg', ...
-                    obj.createCHReject(sender, t));
+                    obj.createCHReject(sender, t, leafID));
                 return;
             end
-            
-            % Accept CH: Enter Access radio lock and send CH_ACK with local key
+
+            % Accept: Enter Access radio lock (on the immediate neighbor)
+            % and send CH_ACK with the local key + new 5-bit passkey, both
+            % issued for the TRUE leaf identity.
             gw.radioAccess.setLock(sender, WSN_Config.CH_ACCESS_LOCK_TIMER);
-            
-            % Generate local key for this CH
-            localKey = obj.generateLocalKeyForCH(sender);
-            
-            % Store the local key for future use
-            gw.chLocalKeys(dec2hex(uint16(sender),4)) = localKey;
-            
-            gw.addLogAccess(sprintf('t=%d [CH_ACK] -> %s (sending key)', ...
-                t, dec2hex(uint16(sender), 4)), [], t);
-            
+
+            localKey = obj.generateLocalKeyForCH(leafID);
+            passkey = obj.generatePasskeyForCH(leafID);
+            gw.chLocalKeys(dec2hex(uint16(leafID),4)) = localKey;
+            gw.chPasskeys(dec2hex(uint16(leafID),4)) = passkey;
+
+            gw.addLogAccess(sprintf('t=%d [CH_ACK] %s -> %s (sending key+passkey, relayed=%d)', ...
+                t, dec2hex(uint16(leafID), 4), dec2hex(uint16(sender), 4), leafID ~= sender), [], t);
+
             actions{end+1} = struct('type', 'RESP', 'msg', ...
-                obj.createCHACK(sender, localKey, t));
+                obj.createCHACK(sender, leafID, localKey, passkey, t));
+        end
+
+        function passkey = generatePasskeyForCH(obj, chID)
+            % Generate the 5-bit (0-31) verification passkey for a CH,
+            % issued alongside its localKey. Every message from a verified
+            % CH must have this appended at the end of its payload before
+            % encryption, so the GWN (and any future verification logic)
+            % can distinguish genuinely-verified traffic. Derived the same
+            % way generateLocalKeyForCH derives the 16-byte key, just folded
+            % down to WSN_Config.CH_PASSKEY_MAX+1 possible values.
+            gw = obj.gw;
+            if isempty(gw.encryptionKey)
+                passkey = uint8(randi([0 WSN_Config.CH_PASSKEY_MAX]));
+            else
+                gk = uint8(hex2dec(reshape(gw.encryptionKey, 2, [])'));
+                chBytes = typecast(uint16(chID), 'uint8');
+                passkey = uint8(mod(sum(gk) + sum(chBytes), WSN_Config.CH_PASSKEY_MAX + 1));
+            end
         end
         
         function actions = handle_CH_KEY_ACK(obj, msg, t)
-            % 6.2 KEY_ACK: CH confirmed receipt of key (encrypted)
+            % 6.2 KEY_ACK: CH confirmed receipt of key (encrypted) -- the
+            % TRUE identity being verified is msg.originalSrc (the leaf),
+            % not msg.src (just the immediate, possibly-relaying, neighbor
+            % that physically delivered this hop).
             % Response: Clear lock, add CH to children, send 5.1 CH_HELLO to parent
             actions = {};
             gw = obj.gw;
             sender = msg.src;
-            
+            leafID = msg.originalSrc;
+            if leafID == 0, leafID = sender; end
+
             % Validate this is from our Access lock partner
             if isempty(gw.radioAccess.handshakePartner) || gw.radioAccess.handshakePartner ~= sender
                 gw.addLogAccess(sprintf('t=%d [IGNORE] KEY_ACK from %s (not Access partner)', ...
                     t, dec2hex(uint16(sender), 4)), [], t);
                 return;
             end
-            
+
             % Clear Access radio lock
             gw.radioAccess.clearLock('CH_SUCCESS');
-            
-            % Add CH to children with brackets [AAxx]
-            % Store CH children separately or mark them in children list
-            if ~ismember(sender, gw.chChildren)
+
+            % Add the TRUE leaf CH to children (direct or relayed -- this
+            % GWN tracks it as a direct child either way, oblivious to the
+            % relay, per spec. Real path visibility comes from 6.5 CH_INFO).
+            if ~ismember(leafID, gw.chChildren)
                 if isempty(gw.chChildren)
-                    gw.chChildren = sender;
+                    gw.chChildren = leafID;
                 else
-                    gw.chChildren = [gw.chChildren, sender];
+                    gw.chChildren = [gw.chChildren, leafID];
                 end
             end
 
             % ML-IDS: seed silence tracking at t=now, so a freshly-joined
             % CH isn't immediately flagged as silent before its first report
-            if isempty(find([gw.chLastAggSeen.id] == sender, 1)) %#ok<EFIND>
-                gw.chLastAggSeen(end+1) = struct('id', sender, 'lastTime', t);
+            if isempty(find([gw.chLastAggSeen.id] == leafID, 1)) %#ok<EFIND>
+                gw.chLastAggSeen(end+1) = struct('id', leafID, 'lastTime', t);
             end
 
-            gw.addLogAccess(sprintf('t=%d [CH_JOINED] %s added to children', ...
-                t, dec2hex(uint16(sender), 4)), [], t);
+            gw.addLogAccess(sprintf('t=%d [CH_JOINED] %s added to children (relayed=%d)', ...
+                t, dec2hex(uint16(leafID), 4), leafID ~= sender), [], t);
 
             % Mark stale so announcePendingChChildren() (called every tick
             % from WSN_Gateway.step()) picks this up -- sends now if we
@@ -1535,39 +1617,32 @@ classdef WSN_Gateway_Messaging < handle
         end
         
         function actions = handle_CH_INFO(obj, msg, t)
-            % 6.5 CH_INFO: Parent CH informs GWN of recruited secondary CH
-            % Payload: {Recruited CH ID, Parent CH ID} encrypted in local key
+            % 6.5 CH_INFO: hop-by-hop relay-topology announcement -- may
+            % have crossed multiple latch hops verbatim before reaching me
+            % (see CH/WSN_ClusterHead.m createCHINFO/relayMessageIfNotMine),
+            % so msg.src here is just the LAST hop, not necessarily the
+            % latch that originated the announcement. Deliberately
+            % unencrypted (visibility-only side-channel; the security-
+            % critical exchange is the real KEY_ACK/passkey handshake per
+            % leaf) -- there is no single key that could decrypt it once
+            % relayed past its originating latch anyway.
+            % Payload: {Recruited/leaf CH ID, originating-latch CH ID}
             actions = {};
             gw = obj.gw;
-            sender = msg.src;  % Parent CH
-            
-            % Decrypt payload using local key for this CH
-            localKey = obj.getLocalKeyForCH(sender);
-            if isempty(localKey)
-                gw.addLogAccess(sprintf('t=%d [ERROR] CH_INFO from %s - no local key', ...
-                    t, dec2hex(uint16(sender), 4)), [], t);
-                return;
-            end
-            
-            decryptedPayload = obj.decryptPayload(msg.payload, localKey);
-            if numel(decryptedPayload) < 4
+            sender = msg.src;  % Last hop, not necessarily the originating latch
+
+            if msg.payloadLen < 4
                 gw.addLogAccess(sprintf('t=%d [ERROR] CH_INFO from %s - invalid payload', ...
                     t, dec2hex(uint16(sender), 4)), [], t);
                 return;
             end
-            
-            % Parse: Recruited CH ID (2 bytes), Parent CH ID (2 bytes)
-            recruitedID = typecast(decryptedPayload(1:2), 'uint16');
-            parentCHID = typecast(decryptedPayload(3:4), 'uint16');
-            
-            if parentCHID ~= sender
-                gw.addLogAccess(sprintf('t=%d [ERROR] CH_INFO from %s - parent mismatch %s', ...
-                    t, dec2hex(uint16(sender), 4), dec2hex(uint16(parentCHID), 4)), [], t);
-                return;
-            end
-            
-            gw.addLogAccess(sprintf('t=%d [SECONDARY_CH] %s recruited by %s', ...
-                t, dec2hex(uint16(recruitedID), 4), dec2hex(uint16(sender), 4)), [], t);
+
+            % Parse: Recruited/leaf CH ID (2 bytes), originating-latch CH ID (2 bytes)
+            recruitedID = typecast(msg.payload(1:2), 'uint16');
+            latchID = typecast(msg.payload(3:4), 'uint16');
+
+            gw.addLogAccess(sprintf('t=%d [SECONDARY_CH] %s latched via %s (heard from %s)', ...
+                t, dec2hex(uint16(recruitedID), 4), dec2hex(uint16(latchID), 4), dec2hex(uint16(sender), 4)), [], t);
 
             % Track separately from first-degree chChildren (see property
             % comment on WSN_Gateway.secondaryChChildren) and mark stale so
@@ -1625,30 +1700,40 @@ classdef WSN_Gateway_Messaging < handle
             end
         end
         
-        function msg = createCHACK(obj, dst, localKey, t)
-            % Create 6.1 CH_ACK message with local key in payload
+        function msg = createCHACK(obj, dst, leafID, localKey, passkey, t)
+            % Create 6.1 CH_ACK: dst is the IMMEDIATE neighbor (could be a
+            % relay), originalSrc=leafID is who this is really for so the
+            % chain of latches can reverse-route it back down. Payload is
+            % the 16-byte localKey + the new 5-bit passkey appended last.
             gw = obj.gw;
             msg = WSN_Message();
             msg.type = WSN_Config.MSG_TYPE_CH_CMD;
             msg.subtype = WSN_Config.CH_SUB_ACK;  % 1
             msg.src = hex2dec(gw.hexID);
             msg.dst = dst;
+            msg.originalSrc = leafID;
             msg.ttl = 1;
             msg.seq = mod(t, 256);
             msg.flag = 0;
-            msg.payload = localKey(:)';
+            msg.payload = [localKey(:)', uint8(passkey)];
             msg.payloadLen = numel(msg.payload);
             msg.addChecksum();
         end
-        
-        function msg = createCHReject(obj, dst, t)
-            % Create 6.3 CH_REJECT message
+
+        function msg = createCHReject(obj, dst, t, leafID)
+            % Create 6.3 CH_REJECT message. leafID (optional) identifies who
+            % the rejection is really about when relayed; defaults to dst
+            % (hop-local rejection, no relay involved).
+            if nargin < 4 || isempty(leafID)
+                leafID = dst;
+            end
             gw = obj.gw;
             msg = WSN_Message();
             msg.type = WSN_Config.MSG_TYPE_CH_CMD;
             msg.subtype = WSN_Config.CH_SUB_REJECT;  % 3
             msg.src = hex2dec(gw.hexID);
             msg.dst = dst;
+            msg.originalSrc = leafID;
             msg.ttl = 1;
             msg.seq = mod(t, 256);
             msg.flag = 0;
