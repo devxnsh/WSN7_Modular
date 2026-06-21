@@ -1,6 +1,41 @@
-# Recruitment Chain Race Conditions (2026-06-21)
+# Recruitment Chain Race Conditions (2026-06-21, updated same day)
 
-## Scope and ground rules
+## Update: follow-up pass with actual fixes
+
+A follow-up request asked to find and **fix** (not just document) the exact
+edge cases behind three symptoms: unconnected segments in the GWN ring,
+unrecruited center-of-topology CHs, and attacker nodes being accepted as
+trusted data into the GWN ring without key verification. This required
+reading considerably more of `GWN/WSN_Gateway_Behavior.m` and
+`GWN/WSN_Gateway_Messaging.m` than the original pass below, which changed
+several conclusions:
+
+- **One real, fixable security bug found and fixed**: `handle_GLOBAL_KEY`
+  (`GWN/WSN_Gateway_Messaging.m`) accepted a GLOBAL_KEY frame from *any*
+  sender (not just the GWN's actual `parent`) and trusted whatever key value
+  it contained with **zero verification** against the network's real
+  `WSN_Message.GLOBAL_AES_KEY_HEX`. This is the precise mechanism behind
+  "attacker injection without key verification directly into the GWN ring" -
+  see "Security fix" section below for the full writeup.
+- **The originally-hypothesized G1 race (late ENC_HELLO honored against a
+  reassigned lock) is largely REFUTED** on closer reading: the timeout-
+  recovery path (`WSN_Gateway_Behavior.m:417-487`, "CASE 1: Has key + Has
+  parent") *does* correctly purge the timed-out partner from
+  `pendingChildren` and send it a `PARENT_REJECT`, contrary to what the
+  original pass assumed. The `pendingChildren`/`handshakePartner`
+  desync this document originally worried about does not appear to occur
+  in the dominant code path.
+- **"Unconnected GWN ring segments" and "unrecruited center CH" are
+  primarily explained by two *intentional* design constraints**, not bugs -
+  see "Topology/design findings" below. There is one genuine (but low-
+  impact, given current config values) gap noted for completeness.
+
+Everything below this point is the **original** investigation (unchanged) -
+kept for history. Skip to the bottom sections for the new findings.
+
+---
+
+## Scope and ground rules (original pass)
 
 This document is **investigation and documentation only** - no fixes were
 implemented, per explicit instruction. It covers the three recruitment/
@@ -170,3 +205,131 @@ timeout-recovery branches in `GWN_Gateway_Behavior.m:356-522` ("ORPHAN KEY"
 `pendingChildren` consistently with clearing `handshakePartner` - that's the
 root of Race G1 and the only finding here with a plausible (if rare)
 correctness impact rather than just a liveness delay.
+
+---
+
+## Follow-up pass (2026-06-21, same day): actual fixes and refined findings
+
+### Security fix: GLOBAL_KEY forgery (the "attacker injection without key verification" bug)
+
+**File**: `GWN/WSN_Gateway_Messaging.m`, `handle_GLOBAL_KEY`.
+
+**Root cause, confirmed by reading the full handshake dispatch path**
+(`handleReceive`'s CMD/Type-7 switch, `GWN/WSN_Gateway_Messaging.m:336-359`):
+the only gates before a Type 7 subtype 4 (GLOBAL_KEY) frame reaches
+`handle_GLOBAL_KEY` are (a) checksum verification and (b) `msg.dst ==
+hex2dec(gw.hexID)` (must be unicast to us). There is **no check that
+`msg.src` is our actual `gw.parent`** - the lock-refresh logic at line
+344-347 only refreshes the handshake timer if the sender matches
+`handshakePartner`, it does not gate dispatch. Inside the old
+`handle_GLOBAL_KEY`, the only guard was `isempty(gw.parent)` (do we have
+*some* parent), not "is this sender *our* parent." Once past that, the
+received `keyHex` (`msg.getGlobalKeyPayload()`) was written directly to
+`gw.encryptionKey` with no validation against anything.
+
+**Consequence**: any node that knows the protocol (trivial in an
+open-source simulator - every node class has access to the same code) can
+craft a Type 7.4 frame addressed to a victim GWN that already has a parent,
+with an arbitrary `keyHex` payload, and the victim will silently accept it
+as its root-of-trust encryption key - corrupting `gw.localKeyHex`
+(re-derived from the bogus key) and, transitively, every CH-issued local
+key downstream of that GWN. This is also a strong candidate root cause for
+the corrupted/garbage sensor IDs found during the earlier 5.2-payload audit
+(see `GWN_Shell.md`'s "Separate, NOT-yet-fixed issue" section) - a desynced
+`encryptionKey` would produce exactly that kind of silent decode corruption
+without ever throwing a MATLAB error.
+
+**Fix** (implemented, then corrected same day): `handle_GLOBAL_KEY` now
+rejects the frame (logs `[SECURITY] DROP GLOBAL_KEY ...` and returns)
+unless `msg.src == gw.parent` - the one GWN identity besides its own child
+that a GWN is meant to know in this design, so checking against it doesn't
+leak anything about the wider ring.
+
+**Correction**: the first version of this fix *also* required the received
+`keyHex` to exactly equal the hardcoded `WSN_Message.GLOBAL_AES_KEY_HEX`
+constant. That was wrong and has been removed. Per design clarification:
+each GWN only ever knows its Parent and Child (deliberately, so the Sink's
+identity can't be found by ID-tracing any single node), and the global key
+is meant to be *propagated hop-by-hop down the ring* rather than something
+every node independently knows in advance to match against - that
+propagation is also what enables future key rotation (local key reset on
+suspicion, global key reset on confirmed attack, per the Trust/Census/
+Shutdown protocol). A static equality check would silently reject any
+legitimate key after a future rotation, defeating the entire point of
+propagation-based trust - "if global keys are already known to all nodes
+and are simply matched, it defeats the point." The `sender == gw.parent`
+check is the correct verification boundary for this design: trust comes
+from *who* handed you the key (your already-known parent), not from
+matching its value against a shared secret. A dormant-hook comment was left
+at the fix site for the "double verification" the design calls for once
+key rotation is actually implemented (e.g. cross-checking against a
+freshly-derived local key or a reset-epoch counter) - not implemented yet,
+left undone rather than guessed at.
+
+Verified via repeated 400-600 step headless runs post-fix showing normal
+multi-hop GWN chains forming with valid `LocalKey` values at every hop
+(`sink_nodeRegistry` export, e.g. `FF08 -> FF0A -> FF02 -> FF06 -> FF01`,
+each with a populated `LocalKey` column) - both before and after the
+correction, since `sender == gw.parent` alone is sufficient to reject
+forged/unsolicited GLOBAL_KEY frames without touching legitimate traffic.
+
+**Scope note**: this closes the GWN-ring-level gap specifically. The
+SN-tier (`Type 1` sensor data accepted by both CH and GWN with only a
+checksum check, no sender-identity verification) was investigated and found
+to be the *same*, consistent design across both `CH/Registry/
+WSN_ClusterHead_Registry.m` and `GWN/WSN_Gateway_Messaging.m` -
+sensors never perform a key exchange by protocol design (resource-
+constrained leaf tier; the codebase's defense for malicious sensors is
+trust/census-based behavioral detection, not cryptographic admission
+control). That is a much larger, deliberate architectural choice, not a
+localized bug, so it was left as-is - flagging here for visibility rather
+than silently leaving it out.
+
+### Topology/design findings: why GWN ring segments and center CHs can stay unconnected
+
+Two confirmed, **intentional** design constraints largely explain both
+symptoms:
+
+1. **A non-Sink GWN recruits exactly one child, ever**
+   (`GWN_Gateway_Behavior.m:547-550`: `if ~isa(gw,'WSN_Sink') &&
+   ~isempty(gw.children), return;`). This is consistent with the network
+   being a **ring/chain**, not a fan-out tree - each GWN has one parent
+   slot and recruits one child slot, by design. (It does retry *other*
+   candidates if its current target rejects/times out, cycling through
+   `valid` neighbors - it is not "locked onto one candidate forever," just
+   capped at one *successful* child.)
+2. **CH-CH chaining is capped at exactly one hop**
+   (`CH/WSN_ClusterHead.m:15,418,480`: `isQualifiedToRecruit` is only ever
+   `true` for a GWN-anchored CH; a CH that itself joined via another CH is
+   never qualified to recruit further). A center-of-topology CH that is
+   more than one CH-CH hop *and* out of direct/DVS-boosted GWN range from
+   any GWN-anchored CH has no path into the network - this is a genuine
+   radio-range/topology limitation given the one-hop cap, not a timing bug.
+
+Both are deliberate stability choices (an unbounded relay-chain depth would
+risk cascading failures and was explicitly capped per the existing
+`isQualifiedToRecruit` comment). Ripping out either cap is a network-design
+change, not a bug fix, and was not done here without that explicit ask.
+
+**Mechanisms that were checked and found to already work correctly** (so
+they are *not* the explanation, despite being plausible candidates):
+- **ST_REJECT forgiveness**: `GWN_Gateway_Behavior.m:143-159` already
+  periodically resets `ST_REJECT` back to `ST_NONE` every
+  `WSN_Config.GWN_REJECTED_RESET_INTERVAL` (50 ticks) - a transient
+  rejection does not permanently blacklist a neighbor. This mirrors the
+  CH-tier's `rejectedGWNs`/`rejectedCHs` forgiveness window
+  (`CH_Shell.md` Issue #5, already fixed).
+- **Lock-timeout cleanup** (re-examined Race G1 above): the dominant
+  "CASE 1: Has key + Has parent" timeout-recovery path does correctly purge
+  `pendingChildren` and notify the timed-out partner via `PARENT_REJECT`.
+
+**One genuine but low-impact gap noted**: the RX lock filter
+(`Utils/WSN_Radio.m:166-189`, `passesLockFilter`) does not exempt Type 0
+(HELLO) broadcasts - while a GWN is locked mid-handshake, incoming HELLO
+from *other* neighbors is dropped, meaning neighbor-table discovery briefly
+pauses during a lock. Checked against the actual configured values
+(`HandshakeTimeout = 6` ticks vs. the dead-neighbor purge threshold of
+`3 * HelloInterval = 1500` ticks): a 6-tick pause cannot cause a neighbor to
+be purged, so in the current configuration this does not contribute to
+unconnected segments. Flagging for completeness in case `HandshakeTimeout`
+is ever tuned much larger relative to `HelloInterval`.

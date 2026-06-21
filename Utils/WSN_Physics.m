@@ -2,11 +2,34 @@ classdef WSN_Physics
     methods (Static)
 
         function [physAdj, stblAdj, distMat] = updateConnectivity(nodes)
+            persistent cachedPos cachedDistMat
 
             N = numel(nodes);
-            distMat = zeros(N);
             physAdj = false(N);
             stblAdj = false(N);
+
+            % ---------------- DISTANCE MATRIX (cached) ----------------
+            % Node positions are static for the life of a run (no mobility -
+            % pos is set once during topology generation and never written
+            % again), so the pairwise distance matrix is identical every
+            % tick. Cache it and only recompute when positions actually
+            % differ (e.g. a fresh topology from a new WSN_Main/WSN_Attack_
+            % Demo run) - this returns byte-identical distMat values, it
+            % only skips redundant norm() calls when the input is unchanged.
+            curPos = cat(1, nodes.pos);
+            if isequal(curPos, cachedPos) && isequal(size(cachedDistMat), [N N])
+                distMat = cachedDistMat;
+            else
+                distMat = zeros(N);
+                for i = 1:N
+                    for j = 1:N
+                        if i == j, continue; end
+                        distMat(i,j) = norm(nodes(i).pos - nodes(j).pos);
+                    end
+                end
+                cachedPos = curPos;
+                cachedDistMat = distMat;
+            end
 
             % ---------------- CONFIG ----------------
             plExp_Std  = WSN_Config.PathLossExp;             % e.g. 2.4
@@ -39,8 +62,7 @@ classdef WSN_Physics
                 for j = 1:N
                     if i == j, continue; end
 
-                    d = norm(nodes(i).pos - nodes(j).pos);
-                    distMat(i,j) = d;
+                    d = distMat(i,j);
 
                     % -------- HARD RANGE CUTOFF (sender-based) --------
                     % TX still occurs; delivery blocked

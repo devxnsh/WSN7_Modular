@@ -112,7 +112,17 @@ visualLines = [];
 % Initial Physical Connectivity Calculation (Get both Phys and Stable matrices)
 [physAdj, stblAdj, distMat] = WSN_Physics.updateConnectivity(nodes); % % Available for debugging
 % --- ID TRANSLATION HELPERS ---
-id2idx = @(hid) find(arrayfun(@(n) hex2dec(n.hexID) == hid, nodes), 1);
+% O(1) hexID->array-index lookup (was O(N) per call via arrayfun+find,
+% called multiple times per message delivery in the loop below). Node
+% membership/hexIDs are fixed for the life of a run (nodes is only assigned
+% once, above), so building this map once is safe and returns identical
+% results - including [] on a miss, exactly like the old find(...,1)
+% behavior - for every input.
+hexIDtoIdx = containers.Map('KeyType', 'double', 'ValueType', 'double');
+for k = 1:numel(nodes)
+    hexIDtoIdx(hex2dec(nodes(k).hexID)) = k;
+end
+id2idx = @(hid) lookupNodeIdx(hexIDtoIdx, hid);
 idx2id = @(idx) hex2dec(nodes(idx).hexID); % % Helper function
 
 % 2. SIMULATION LOOP
@@ -402,41 +412,53 @@ try
 
 
                     % VISUALIZATION
-                    [col, lw, ls] = classifyPacket(m, nodes, srcIdx, t);
-                    
-                    % Skip visualization for Hello messages (Type 0) from NORMAL nodes
-                    % But DO draw them if they're from malicious nodes (stark colors)
-                    if m.type == WSN_Config.MSG_TYPE_HELLO
-                        if ~WSN_Attack.isMaliciousNode(srcIdx, t)
-                            % Normal Hello: skip visualization
-                            continue;
+                    % Only build visual-line entries when the GUI is (or
+                    % will become) visible this tick. visualLines is only
+                    % ever read inside the "t >= startGUIAt" render block
+                    % below, where it's pruned by expiry before first use -
+                    % so any entries built before startGUIAt would already
+                    % be expired and discarded by that first prune. Gating
+                    % construction here produces identical rendered output
+                    % while avoiding unbounded accumulation (visualLines was
+                    % never pruned, so it grew for the entire run) and the
+                    % classifyPacket() call cost during headless ticks.
+                    if t >= startGUIAt
+                        [col, lw, ls] = classifyPacket(m, nodes, srcIdx, t);
+
+                        % Skip visualization for Hello messages (Type 0) from NORMAL nodes
+                        % But DO draw them if they're from malicious nodes (stark colors)
+                        if m.type == WSN_Config.MSG_TYPE_HELLO
+                            if ~WSN_Attack.isMaliciousNode(srcIdx, t)
+                                % Normal Hello: skip visualization
+                                continue;
+                            end
+                            % Malicious Hello: draw with stark color (short lifetime)
+                            lifetime = 1;
+                        elseif m.type == WSN_Config.MSG_TYPE_HB
+                            % Heartbeat: skip if normal, draw if malicious
+                            if ~WSN_Attack.isMaliciousNode(srcIdx, t)
+                                continue;
+                            end
+                            % Malicious Heartbeat: draw with stark color
+                            lifetime = 1;
+                        elseif m.type == WSN_Config.MSG_TYPE_TOKEN || m.type == WSN_Config.MSG_TYPE_SENSOR
+                            % TOKEN and SENSOR packets expire immediately (flash effect)
+                            lifetime = 1;
+                        else
+                            % All other messages: longer lifetime
+                            lifetime = 5;
                         end
-                        % Malicious Hello: draw with stark color (short lifetime)
-                        lifetime = 1;
-                    elseif m.type == WSN_Config.MSG_TYPE_HB
-                        % Heartbeat: skip if normal, draw if malicious
-                        if ~WSN_Attack.isMaliciousNode(srcIdx, t)
-                            continue;
-                        end
-                        % Malicious Heartbeat: draw with stark color
-                        lifetime = 1;
-                    elseif m.type == WSN_Config.MSG_TYPE_TOKEN || m.type == WSN_Config.MSG_TYPE_SENSOR
-                        % TOKEN and SENSOR packets expire immediately (flash effect)
-                        lifetime = 1;
-                    else
-                        % All other messages: longer lifetime
-                        lifetime = 5;
+
+                        vl = struct( ...
+                            'srcPos', nodes(srcIdx).pos, ...
+                            'dstPos', nodes(dID).pos, ...
+                            'color',  col, ...
+                            'style',  ls, ...
+                            'width',  lw, ...
+                            'expiry', t+lifetime );
+
+                        visualLines = [visualLines, vl];
                     end
-
-                    vl = struct( ...
-                        'srcPos', nodes(srcIdx).pos, ...
-                        'dstPos', nodes(dID).pos, ...
-                        'color',  col, ...
-                        'style',  ls, ...
-                        'width',  lw, ...
-                        'expiry', t+lifetime );
-
-                    visualLines = [visualLines, vl];
                 end
             end
             if anyDelivered
@@ -755,8 +777,17 @@ end
                         fprintf(fid, '%s,%s,%d,BACKBONE,\"%s\"\n', nodeID, nodeType, n.tier, entry);
                         combinedCount = combinedCount + 1;
                     end
+                    % Clear after export - logs are never capped (addLog
+                    % appends with no eviction), so without this each
+                    % subsequent autolog re-exports the ENTIRE history
+                    % again (duplicating prior exports) and the per-export
+                    % cost grows ~O(t), making total autolog cost ~O(t^2)
+                    % over a run. Exported data already landed in this
+                    % file; the in-memory log only needs to hold entries
+                    % since the LAST export.
+                    n.logBackbone = {};
                 end
-                
+
                 % Access log (GWN/Sink only)
                 if isprop(n, 'logAccess') && ~isempty(n.logAccess)
                     for j = 1:numel(n.logAccess)
@@ -764,8 +795,9 @@ end
                         fprintf(fid, '%s,%s,%d,ACCESS,\"%s\"\n', nodeID, nodeType, n.tier, entry);
                         combinedCount = combinedCount + 1;
                     end
+                    n.logAccess = {};
                 end
-                
+
                 % Unified log (all nodes)
                 if isprop(n, 'log') && ~isempty(n.log)
                     for j = 1:numel(n.log)
@@ -773,6 +805,7 @@ end
                         fprintf(fid, '%s,%s,%d,UNIFIED,\"%s\"\n', nodeID, nodeType, n.tier, entry);
                         combinedCount = combinedCount + 1;
                     end
+                    n.log = {};
                 end
             end
             fclose(fid);
@@ -833,4 +866,16 @@ end
         end
     end
 
+end
+
+function idx = lookupNodeIdx(map, hid)
+    % O(1) hexID->array-index lookup backing id2idx (see "ID TRANSLATION
+    % HELPERS" near the top of WSN_Main). Mirrors the exact miss behavior
+    % of the old find(arrayfun(...), 1) implementation: returns [] for an
+    % empty/unmatched hid instead of erroring on a missing containers.Map key.
+    if isempty(hid) || ~isKey(map, double(hid))
+        idx = [];
+    else
+        idx = map(double(hid));
+    end
 end

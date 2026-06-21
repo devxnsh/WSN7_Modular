@@ -1,15 +1,17 @@
-# Simulator Performance Evaluation (2026-06-21)
+# Simulator Performance Evaluation (2026-06-21, updated same day)
 
 ## Scope and ground rules
 
-This is an evaluation, not a changelog. Per the explicit constraint given for
-this pass ("no change in functionality or visualization is preferred"), the
-findings below are **documented but not implemented** unless noted
-otherwise. Each finding below was traced by directly reading the cited code
-(not taken on faith from automated analysis) - findings are marked
-**VERIFIED** (I read the exact lines and confirmed the behavior) or
-**REPORTED** (surfaced by an initial pass, plausible, but I did not
-personally re-derive every detail).
+Findings below were traced by directly reading the cited code (not taken on
+faith from automated analysis) - marked **VERIFIED** (I read the exact lines
+and confirmed the behavior) or **REPORTED** (surfaced by an initial pass,
+plausible, but I did not personally re-derive every detail).
+
+**Update**: findings 1a, 2, and 3 were subsequently implemented (see
+"Implementation Update" at the bottom) after a follow-up request to apply
+everything that could be done safely. 1b and 4 remain documented-only -
+both have a concrete, verified mechanism that would let an optimization
+silently change simulation behavior, so they were left as-is.
 
 Risk ratings:
 - **LOW-RISK**: mechanical change (caching an already-computed value,
@@ -93,29 +95,47 @@ return value** for any input (same hit/miss behavior as the current
 explicit `isKey()` check to preserve that exact miss behavior rather than
 letting `containers.Map` throw on a missing key).
 
-**Not implemented in this pass**: `WSN_Main.m` uses MATLAB nested functions
-(`classifyPacket` at line 545, `autoExportLogs` at line 713, both defined
-inside `WSN_Main`'s body and sharing its workspace - confirmed via grep for
-`^    function `). Mixing a new helper function into a nested-function file
-correctly (matching this file's specific `end`-handling convention) needs
-care I did not want to rush given the "no functionality/visualization
-change" constraint - a mistake here is a parse-breaking risk, not just a
-behavior risk. Documenting as the clear top candidate for hand-implementation
-with testing, rather than implementing under time pressure.
+**Implemented** (see "Implementation Update" below) - the nested-function
+integration concern was resolved by adding the lookup as a plain local
+function placed *after* `WSN_Main`'s own closing `end`, taking the map and
+the ID as explicit parameters rather than relying on implicit nested-scope
+access. This sidesteps the file's specific nesting convention entirely.
 
 ---
 
-## Finding 3 (REPORTED, plausible): visualization line array grows by repeated concatenation
+## Finding 3 (upgraded from REPORTED to VERIFIED, and from "perf nit" to "real bug"): `visualLines` is never pruned in headless mode - unbounded growth, not just reallocation churn
 
-**File**: `Simulator/WSN_Main.m:439` area - `visualLines = [visualLines, vl]`
-inside the per-delivery loop, pruned later (~line 513) by expiry. MATLAB
-array concatenation in a loop reallocates on every append; for runs with
-many deliveries per tick this is avoidable churn. Preallocating to a
-generous fixed size and tracking a "next free slot" index would remove the
-reallocation cost. This only matters when the GUI is visible (the array
-feeds rendering), so it has zero effect on headless-mode throughput.
-**LOW-RISK** if implemented (pure internal storage change, output rendering
-identical) but not verified line-by-line in this pass.
+**File**: `Simulator/WSN_Main.m` - `visualLines = [visualLines, vl]` (was
+line 449) inside the per-delivery loop.
+
+The original report characterized this as array-concatenation churn (a
+preallocation opportunity). On closer reading, it's worse than that:
+**construction** of `visualLines` entries was unconditional (ran on every
+qualifying message delivery, every tick, regardless of GUI visibility), but
+**pruning** by expiry (`visualLines = visualLines([visualLines.expiry] >=
+t)`) only happens inside the `if t >= startGUIAt` render block. In headless
+mode (`startGUIAt = 1e9`), that render block - and therefore the prune -
+never executes, so `visualLines` accumulated an entry for every visualized
+message delivery for the *entire run* and was never trimmed. For a long
+headless run this is unbounded memory growth, not just avoidable churn.
+
+**Why gating construction behind `t >= startGUIAt` is safe (with one honest
+caveat)**: `visualLines` is only ever read inside that same render block.
+Almost all pre-reveal entries would already be expired (1-5 tick lifetime)
+by the time the first prune runs at `t == startGUIAt`, EXCEPT entries from
+the handful of ticks immediately before `startGUIAt` (up to 4 ticks' worth,
+since max lifetime is 5) - those would have survived into the first
+rendered frame under the old behavior, and do not exist under the new
+gated behavior. This is a real, if extremely minor, difference: the very
+first frame after the GUI is revealed (or for a partial-headless run, the
+first frame after `HeadlessSteps` elapses) may show slightly fewer
+in-flight packet lines than before - a sub-5-tick, one-frame cosmetic
+difference, not a change to any simulation outcome (no message delivery,
+attack logic, or exported data is affected; `visualLines` has no read
+access from anywhere except the render block). Flagging this explicitly
+rather than overclaiming pixel-identical output. **Implemented and
+verified** (parse + multiple successful runs, including a partial-headless
+run exercising the GUI-reveal transition - see below).
 
 ---
 
@@ -131,7 +151,13 @@ type tag (e.g., a `tier` or `nodeType` enum already exists per
 **LOW-RISK** mechanically, but auditing every call site to confirm none of
 them rely on `isa()`'s subclass-matching semantics (e.g. `WSN_Sink <
 WSN_Gateway`, so `isa(sinkNode, 'WSN_Gateway')` is also `true` - a naive tier
-tag swap could silently change this) needs care. Not implemented.
+tag swap could silently change this) needs care. **Still not implemented**
+after the follow-up pass: this is the one remaining finding where "safely
+implementable" genuinely isn't established yet - it would need a per-call-site
+audit (there are 6+ call sites across `WSN_Main.m` and `WSN_Physics.m`) to
+confirm each one's actual semantics before a tag-based replacement could be
+guaranteed behavior-preserving, which is a different scope of work than the
+other three findings (each of which had a single, provably-safe substitution).
 
 ---
 
@@ -147,14 +173,55 @@ verified by reading code alone.
 
 ## Summary table
 
-| # | Finding | Verified? | Severity | Risk if implemented | Implemented this pass? |
-|---|---------|-----------|----------|---------------------|------------------------|
-| 1a | Cache static `distMat` in `WSN_Physics.updateConnectivity` | Yes | Every tick, O(N²) | LOW | No |
-| 1b | Dirty-track `ranges`/`txP` (DVS-aware) | Yes (risk identified) | Every tick, O(N²) | MEDIUM | No |
-| 2 | O(1) `id2idx` via `containers.Map` | Yes | Every message delivery | LOW (needs careful nested-function integration) | No |
-| 3 | Preallocate `visualLines` | No (plausible) | Every delivery, GUI-mode only | LOW | No |
-| 4 | Cache type tags instead of repeated `isa()`/`isprop()` | No (plausible) | Every tick/delivery | LOW-MEDIUM (subclass semantics caveat) | No |
+| # | Finding | Verified? | Severity | Risk | Implemented? |
+|---|---------|-----------|----------|------|---------------|
+| 1a | Cache static `distMat` in `WSN_Physics.updateConnectivity` | Yes | Every tick, O(N²) | LOW | **Yes** |
+| 1b | Dirty-track `ranges`/`txP` (DVS-aware) | Yes (risk identified) | Every tick, O(N²) | MEDIUM | No - DVS makes this unsafe without dirty-tracking |
+| 2 | O(1) `id2idx` via `containers.Map` | Yes | Every message delivery | LOW | **Yes** |
+| 3 | `visualLines` unbounded growth in headless mode (was filed as "preallocate", actually a correctness bug) | Yes (upgraded) | Unbounded memory growth, headless mode | LOW | **Yes** |
+| 4 | Cache type tags instead of repeated `isa()`/`isprop()` | No (plausible) | Every tick/delivery | LOW-MEDIUM | No - needs a per-call-site semantics audit first |
 
-Nothing in this document was applied to `WSN_Main.m` or `WSN_Physics.m` -
-all four findings are documented for a deliberate follow-up pass with
-before/after simulation-output diffing to confirm zero behavior change.
+---
+
+## Implementation Update (2026-06-21, same day)
+
+Findings 1a, 2, and 3 were implemented after a follow-up request to apply
+everything safely implementable. Changes:
+
+- **`Utils/WSN_Physics.m`** (`updateConnectivity`): added a `persistent
+  cachedPos`/`cachedDistMat` pair. `distMat` is now computed once and reused
+  across ticks, invalidating automatically (via `isequal` on positions) if
+  the node set or positions ever differ - covers both the steady-state
+  no-mobility case and `WSN_Attack_Demo.m`'s repeated fresh-topology calls.
+  The inner link-evaluation loop now reads `d = distMat(i,j)` instead of
+  recomputing `norm(...)`. Output values are byte-identical (same formula,
+  computed once instead of every tick) - the `ranges`/`txP`/`pl`
+  (DVS-dependent) and Rayleigh-fading parts of the function were left
+  completely untouched.
+- **`Simulator/WSN_Main.m`**: replaced the O(N) `id2idx` closure with a
+  `containers.Map` (`hexIDtoIdx`) built once before the simulation loop,
+  plus a new local function `lookupNodeIdx(map, hid)` (added after
+  `WSN_Main`'s own closing `end`, taking explicit parameters rather than
+  relying on nested-scope access - sidesteps the file's existing nested-
+  function convention entirely rather than fighting it) that preserves the
+  exact `[]`-on-miss behavior of the original `find(...,1)`.
+- **`Simulator/WSN_Main.m`**: gated `visualLines` entry construction (the
+  `classifyPacket` call and the `vl = struct(...)` / `visualLines =
+  [visualLines, vl]` block) behind the same `t >= startGUIAt` condition that
+  already gates pruning and rendering - fixing the unbounded-growth issue
+  and skipping the per-message classification cost during headless ticks.
+
+**Not implemented**: 1b (DVS-aware range caching) and 4 (`isa()`/`isprop()`
+type-tag caching) - both have a verified, concrete mechanism by which a
+naive optimization would change simulation behavior (DVS mutating
+`controlPower` at runtime; `isa()`'s subclass-matching semantics for
+`WSN_Sink < WSN_Gateway`), so neither qualifies as "safely implementable"
+without additional design work (dirty-tracking, or a full call-site audit,
+respectively) that goes beyond a straightforward substitution.
+
+**Verification**: `meta.class.fromName`/`which` parse checks on all
+affected files; a 300-step/100-node headless run with all 7 attack types
+active (`SIM_OK`, 528 ground-truth entries, ~76s); a partial-headless run
+(`WSN_Launcher('HeadlessSteps', 30, 'SimSteps', 80, ...)`) specifically
+exercising the `t >= startGUIAt` GUI-reveal transition that the
+`visualLines` gating change touches (`PARTIAL_HEADLESS_OK`, no errors).

@@ -236,6 +236,63 @@ classdef WSN_GUI_GlobalEventFeed < handle
                 return;
             end
             
+            % CENSUS (Type 11) - daisy-chain trust polling (ML_IDS_PLAN.md Phase 4)
+            if m.type == 11
+                censusMap = {
+                    0,'CENSUS_POLL_INITIATE'
+                    1,'CENSUS_POLL_YES'
+                    2,'CENSUS_POLL_NO'
+                    3,'CENSUS_POLL_COMPLETE'
+                    };
+                idx = find([censusMap{:,1}] == m.subtype, 1);
+                if isempty(idx)
+                    txt = 'CENSUS';
+                else
+                    txt = censusMap{idx,2};
+                end
+                if bitget(m.flag,1)
+                    txt = ['[ENC] ' txt];
+                end
+                return;
+            end
+
+            % SHUTDOWN (Type 12) - reset/blacklist enforcement
+            if m.type == 12
+                shutdownMap = {
+                    0,'SHUTDOWN_SOFT_RESET'
+                    1,'SHUTDOWN_HARD_RESET'
+                    2,'SHUTDOWN_BLACKLIST'
+                    };
+                idx = find([shutdownMap{:,1}] == m.subtype, 1);
+                if isempty(idx)
+                    txt = 'SHUTDOWN';
+                else
+                    txt = shutdownMap{idx,2};
+                end
+                if bitget(m.flag,1)
+                    txt = ['[ENC] ' txt];
+                end
+                return;
+            end
+
+            % UPDATE (Type 13) - Sink-pushed trust weight/threshold push
+            if m.type == 13
+                updateMap = {
+                    0,'UPDATE_TRUST_DELTA'
+                    1,'UPDATE_THRESHOLD_SET'
+                    };
+                idx = find([updateMap{:,1}] == m.subtype, 1);
+                if isempty(idx)
+                    txt = 'UPDATE';
+                else
+                    txt = updateMap{idx,2};
+                end
+                if bitget(m.flag,1)
+                    txt = ['[ENC] ' txt];
+                end
+                return;
+            end
+
             if m.type ~= 7
                 txt = 'UNKNOWN';
                 return;

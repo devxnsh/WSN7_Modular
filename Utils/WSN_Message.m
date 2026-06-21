@@ -530,14 +530,26 @@ classdef WSN_Message < handle
             switch obj.type
                 case 0
                     str = 'HELLO';
+                case 1
+                    str = 'SENSOR';
+                case 2
+                    str = 'PANIC';
                 case 5
                     str = 'CH_HELLO';
                 case 6
                     str = 'CH_CMD';
                 case 7
                     str = 'CMD';
+                case 8
+                    str = 'TOKEN';
                 case 9
                     str = 'HB';
+                case 11
+                    str = 'CENSUS';
+                case 12
+                    str = 'SHUTDOWN';
+                case 13
+                    str = 'UPDATE';
                 otherwise
                     str = 'UNK';
             end

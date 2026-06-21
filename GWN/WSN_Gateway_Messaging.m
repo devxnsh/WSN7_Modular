@@ -628,16 +628,52 @@ classdef WSN_Gateway_Messaging < handle
             actions = {};
             gw = obj.gw;
             sender = msg.src;
-            
+
             % GUARD: Drop if ACK_JOIN was never received (parent not set)
             % Otherwise node broadcasts ENC_HELLO to dst=0 which is invalid
             if isempty(gw.parent)
                 gw.addLog(sprintf('t=%d [DROP] GLOBAL_KEY from %s - no ACK_JOIN received', t, dec2hex(uint16(sender),4)));
                 return;
             end
-            
+
+            % SECURITY: GLOBAL_KEY must come from our actual parent - this is
+            % the one GWN identity (besides our own child) we're meant to
+            % know, so checking against it doesn't leak anything about the
+            % wider ring. The CMD dispatch in handleReceive only requires
+            % the frame be unicast to us - it does NOT check sender identity
+            % before routing to this handler. Without this guard, ANY node
+            % (not just our accepted parent) can send a GLOBAL_KEY frame and
+            % have it unconditionally overwrite encryptionKey/localKeyHex/
+            % hasKey/isVerified below.
+            if sender ~= gw.parent
+                gw.addLogBackbone(sprintf('t=%d [SECURITY] DROP GLOBAL_KEY from %s - not our parent (%s)', ...
+                    t, gw.fmtID(sender), gw.fmtID(gw.parent)), msg, t);
+                return;
+            end
+
             % Extract key and phase offset from GLOBAL_KEY message
             [keyHex, childPhaseOffset] = msg.getGlobalKeyPayload();
+
+            % NOTE: deliberately NOT checking keyHex against a hardcoded
+            % constant here. By design, the global key is propagated
+            % hop-by-hop down the ring (parent -> child) rather than being
+            % a value every node independently knows in advance - that's
+            % what lets the Sink's identity stay unknown to the rest of the
+            % network (no node can ID-trace its way to the root by
+            % comparing against a known-good value) and what makes future
+            % key rotation possible (local key reset on suspicion, global
+            % key reset on confirmed attack - see Trust/Census/Shutdown
+            % docs in GWN_Shell.md). A static equality check would silently
+            % reject any legitimate post-rotation key, defeating the whole
+            % point of propagation-based trust. The sender==gw.parent check
+            % above is the correct verification boundary: a GWN only ever
+            % trusts key material handed to it by the one parent it already
+            % knows, not by value-matching against a shared secret.
+            % DORMANT HOOK: when key rotation/reset is implemented, this is
+            % the spot for the "double verification" the design calls for
+            % (e.g. cross-checking against a freshly-derived local key or a
+            % reset-epoch counter propagated alongside the key) - not yet
+            % implemented, so left undone rather than guessed at.
             gw.encryptionKey = keyHex;
             gw.localKeyHex = gw.deriveLocalKey();
             gw.hasKey = true;
