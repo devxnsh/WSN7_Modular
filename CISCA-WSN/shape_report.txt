@@ -1,0 +1,881 @@
+Total lines: 1099460, distinct (tags,shape): 293, unmatched: 0
+
+[ 267979] [HELLO_TX]                     bat=<N>% nbr=<N>
+           e.g. t=5 [HELLO_TX] bat=100% nbr=1
+           e.g. t=12 [HELLO_TX] bat=100% nbr=5
+[  88724] [SENSOR_TX]                    val=<N> bat=<N>% pri=<N> -> <HEX>
+           e.g. t=359 [SENSOR_TX] val=48 bat=99% pri=0 -> AA0B
+           e.g. t=367 [SENSOR_TX] val=47 bat=99% pri=0 -> AA0B
+[  43991] [PHASE_RX]                     Listening (Q_fwd=<N>; Q_local=<N>)
+           e.g. t=200 [PHASE_RX] Listening (Q_fwd=4; Q_local=0)
+           e.g. t=204 [PHASE_RX] Listening (Q_fwd=1; Q_local=0)
+[  32324] [CENSUS_COMPLETE]              suspect=<HEX> verdict=<N> (<N>/<N> votes)
+           e.g. t=12 [CENSUS_COMPLETE] suspect=FF07 verdict=2 (0/0 votes)
+           e.g. t=14 [CENSUS_COMPLETE] suspect=FF0D verdict=2 (0/0 votes)
+[  29398] [BB]                           t=<N> [PHASE_RX] Listening (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=200 [PHASE_RX] Listening (Q_fwd=4; Q_local=0)
+           e.g. [BB] t=204 [PHASE_RX] Listening (Q_fwd=1; Q_local=0)
+[  27901] [CENSUS_INITIATE]              suspect=<HEX> trust=<FLOAT> pollUID=<N>
+           e.g. t=2 [CENSUS_INITIATE] suspect=FF07 trust=10.0 pollUID=65503
+           e.g. t=13 [CENSUS_INITIATE] suspect=FF07 trust=10.0 pollUID=57585
+[  26665] [PHASE_TX]                     Sent CH_HELLO.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. t=213 [PHASE_TX] Sent CH_HELLO.1 -> FF0D (Q_fwd=0; Q_local=0)
+           e.g. t=231 [PHASE_TX] Sent CH_HELLO.1 -> FF0D (Q_fwd=0; Q_local=0)
+[  23433] [TERMINAL]                     All neighbors rejected at Max Power. Waiting.
+           e.g. t=133 [TERMINAL] All neighbors rejected at Max Power. Waiting.
+           e.g. t=134 [TERMINAL] All neighbors rejected at Max Power. Waiting.
+[  20580] [BB]                           t=<N> [CENSUS_COMPLETE] suspect=<HEX> verdict=<N> (<N>/<N> votes)
+           e.g. [BB] t=12 [CENSUS_COMPLETE] suspect=FF07 verdict=2 (0/0 votes)
+           e.g. [BB] t=14 [CENSUS_COMPLETE] suspect=FF0D verdict=2 (0/0 votes)
+[  18642] [Q_LOCAL]                      Queued CH_HELLO.<N> (size=<N>/<N>)
+           e.g. t=209 [Q_LOCAL] Queued CH_HELLO.1 (size=1/15)
+           e.g. t=225 [Q_LOCAL] Queued CH_HELLO.1 (size=1/15)
+[  16091] [BB]                           t=<N> [PHASE_TX] Sent CH_HELLO.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=213 [PHASE_TX] Sent CH_HELLO.1 -> FF0D (Q_fwd=0; Q_local=0)
+           e.g. [BB] t=231 [PHASE_TX] Sent CH_HELLO.1 -> FF0D (Q_fwd=0; Q_local=0)
+[  15496] [RX]                           CH_HELLO <- <HEX>
+           e.g. t=358 [RX] CH_HELLO <- AA09
+           e.g. t=361 [RX] CH_HELLO <- FF03
+[  15366] [HELLO_TX]                     bcast battery=<FLOAT>%
+           e.g. t=7 [HELLO_TX] bcast battery=100.0%
+           e.g. t=14 [HELLO_TX] bcast battery=100.0%
+[  15315] [DEQUEUE]                      From Q_local (waited <N> TFs)
+           e.g. t=213 [DEQUEUE] From Q_local (waited 4 TFs)
+           e.g. t=228 [DEQUEUE] From Q_local (waited 3 TFs)
+[  14593] [BB]                           t=<HEX> [PHASE_RX] Listening (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=1002 [PHASE_RX] Listening (Q_fwd=0; Q_local=14)
+           e.g. [BB] t=1003 [PHASE_RX] Listening (Q_fwd=1; Q_local=14)
+[  14364] [PHASE_TX]                     IDLE (queues empty)
+           e.g. t=208 [PHASE_TX] IDLE (queues empty)
+           e.g. t=209 [PHASE_TX] IDLE (queues empty)
+[  14320] [DEQUEUE]                      From Q_fwd (waited <N> TFs)
+           e.g. t=201 [DEQUEUE] From Q_fwd (waited 155 TFs)
+           e.g. t=202 [DEQUEUE] From Q_fwd (waited 136 TFs)
+[  11517] [HELLO_RX]                     NEW <HEX> tier=<N>(UNK) verified=<N> rssi=<FLOAT>
+           e.g. t=16 [HELLO_RX] NEW 004A tier=1(UNK) verified=0 rssi=2.4
+           e.g. t=17 [HELLO_RX] NEW 0003 tier=1(UNK) verified=0 rssi=4.8
+[  11388] [RX_FWD]                       Encrypted CH_HELLO.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. t=228 [RX_FWD] Encrypted CH_HELLO.1 from Child FF03 -> Queue for Parent FF0D
+           e.g. t=231 [RX_FWD] Encrypted CH_HELLO.1 from Child FF07 -> Queue for Parent FF05
+[  11388] [Q_FWD]                        Queued CH_HELLO.<N> (size=<N>/<N>)
+           e.g. t=228 [Q_FWD] Queued CH_HELLO.1 (size=1/15)
+           e.g. t=231 [Q_FWD] Queued CH_HELLO.1 (size=4/15)
+[  11323] [BB]                           t=<N> [Q_LOCAL] Queued CH_HELLO.<N> (size=<N>/<N>)
+           e.g. [BB] t=209 [Q_LOCAL] Queued CH_HELLO.1 (size=1/15)
+           e.g. [BB] t=225 [Q_LOCAL] Queued CH_HELLO.1 (size=1/15)
+[  11210] [BB]                           t=<N> [PHASE_TX] IDLE (queues empty)
+           e.g. [BB] t=208 [PHASE_TX] IDLE (queues empty)
+           e.g. [BB] t=209 [PHASE_TX] IDLE (queues empty)
+[  11122] [AC]                           t=<N> [HELLO_TX] bcast battery=<FLOAT>%
+           e.g. [AC] t=7 [HELLO_TX] bcast battery=100.0%
+           e.g. [AC] t=14 [HELLO_TX] bcast battery=100.0%
+[  11014] [5.2_RETRY]                    seq=<N> attempt=<N>/<N>
+           e.g. t=409 [5.2_RETRY] seq=151 attempt=1/3
+           e.g. t=417 [5.2_RETRY] seq=159 attempt=1/3
+[  10993] [5.3_TX]                       ACK -> <HEX>
+           e.g. t=358 [5.3_TX] ACK -> AA09
+           e.g. t=361 [5.3_TX] ACK -> FF03
+[  10574] [BB]                           t=<HEX> [PHASE_TX] Sent CH_HELLO.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=1000 [PHASE_TX] Sent CH_HELLO.2 -> FF0D (Q_fwd=0; Q_local=14)
+           e.g. [BB] t=1001 [PHASE_TX] Sent CH_HELLO.2 -> FF0D (Q_fwd=0; Q_local=14)
+[   9256] [BB]                           t=<N> [DEQUEUE] From Q_local (waited <N> TFs)
+           e.g. [BB] t=213 [DEQUEUE] From Q_local (waited 4 TFs)
+           e.g. [BB] t=228 [DEQUEUE] From Q_local (waited 3 TFs)
+[   9132] [BB]                           t=<N> [RX] CH_HELLO <- <HEX>
+           e.g. [BB] t=358 [RX] CH_HELLO <- AA09
+           e.g. [BB] t=361 [RX] CH_HELLO <- FF03
+[   8936] [BB]                           t=<N> [DEQUEUE] From Q_fwd (waited <N> TFs)
+           e.g. [BB] t=201 [DEQUEUE] From Q_fwd (waited 155 TFs)
+           e.g. [BB] t=202 [DEQUEUE] From Q_fwd (waited 136 TFs)
+[   7943] [AGG]                          Creating <FLOAT> with <N> sensors
+           e.g. t=360 [AGG] Creating 5.2 with 1 sensors
+           e.g. t=370 [AGG] Creating 5.2 with 4 sensors
+[   7943] [AGG]                          <FLOAT> queued: frag <N>/<N>; <N> sensors; <N> bytes (double-encrypted)
+           e.g. t=360 [AGG] 5.2 queued: frag 1/1; 1 sensors; 13 bytes (double-encrypted)
+           e.g. t=370 [AGG] 5.2 queued: frag 1/1; 4 sensors; 37 bytes (double-encrypted)
+[   7943] [AGG]                          Cleared sensorTable (<N> sensors) - ready for next collection period
+           e.g. t=360 [AGG] Cleared sensorTable (1 sensors) - ready for next collection period
+           e.g. t=370 [AGG] Cleared sensorTable (4 sensors) - ready for next collection period
+[   7888] [BB]                           t=<HEX> [CENSUS_COMPLETE] suspect=<HEX> verdict=<N> (<N>/<N> votes)
+           e.g. [BB] t=1002 [CENSUS_COMPLETE] suspect=FF07 verdict=2 (0/0 votes)
+           e.g. [BB] t=1004 [CENSUS_COMPLETE] suspect=FF0D verdict=2 (0/0 votes)
+[   7394] [5.2_FRAG]                     Fragment <N>/<N>: <N> sensors
+           e.g. t=358 [5.2_FRAG] Fragment 1/1: 1 sensors
+           e.g. t=366 [5.2_FRAG] Fragment 1/1: 3 sensors
+[   7319] [BB]                           t=<HEX> [Q_LOCAL] Queued CH_HELLO.<N> (size=<N>/<N>)
+           e.g. [BB] t=1000 [Q_LOCAL] Queued CH_HELLO.2 (size=15/15)
+           e.g. [BB] t=1000 [Q_LOCAL] Queued CH_HELLO.2 (size=15/15)
+[   6865] [BB]                           t=<N> [RX_FWD] Encrypted CH_HELLO.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. [BB] t=228 [RX_FWD] Encrypted CH_HELLO.1 from Child FF03 -> Queue for Parent FF0D
+           e.g. [BB] t=231 [RX_FWD] Encrypted CH_HELLO.1 from Child FF07 -> Queue for Parent FF05
+[   6865] [BB]                           t=<N> [Q_FWD] Queued CH_HELLO.<N> (size=<N>/<N>)
+           e.g. [BB] t=228 [Q_FWD] Queued CH_HELLO.1 (size=1/15)
+           e.g. [BB] t=231 [Q_FWD] Queued CH_HELLO.1 (size=4/15)
+[   6489] [AC]                           t=<N> [<FLOAT>_TX] ACK -> <HEX>
+           e.g. [AC] t=358 [5.3_TX] ACK -> AA09
+           e.g. [AC] t=361 [5.3_TX] ACK -> FF03
+[   6364] [BB]                           t=<HEX> [RX] CH_HELLO <- <HEX>
+           e.g. [BB] t=1000 [RX] CH_HELLO <- AA09
+           e.g. [BB] t=1003 [RX] CH_HELLO <- AA09
+[   6059] [BB]                           t=<HEX> [DEQUEUE] From Q_local (waited <N> TFs)
+           e.g. [BB] t=1000 [DEQUEUE] From Q_local (waited 29 TFs)
+           e.g. [BB] t=1001 [DEQUEUE] From Q_local (waited 27 TFs)
+[   5384] [BB]                           t=<HEX> [DEQUEUE] From Q_fwd (waited <N> TFs)
+           e.g. [BB] t=1005 [DEQUEUE] From Q_fwd (waited 3 TFs)
+           e.g. [BB] t=1006 [DEQUEUE] From Q_fwd (waited 2 TFs)
+[   5216] [5.2_GROUP]                    RSSI Group <N> (GROUP<N>): <N> sensors
+           e.g. t=359 [5.2_GROUP] RSSI Group 59 (GROUP59): 0 sensors
+           e.g. t=363 [5.2_GROUP] RSSI Group 254 (GROUP254): 254 sensors
+[   5168] [5.2_TX]                       <N> sensors in <N> fragments -> <HEX>
+           e.g. t=358 [5.2_TX] 1 sensors in 1 fragments -> AA0B
+           e.g. t=366 [5.2_TX] 3 sensors in 1 fragments -> AA0B
+[   4774] [BB]                           t=<N> [AGG] Creating <FLOAT> with <N> sensors
+           e.g. [BB] t=360 [AGG] Creating 5.2 with 1 sensors
+           e.g. [BB] t=370 [AGG] Creating 5.2 with 4 sensors
+[   4774] [BB]                           t=<N> [AGG] <FLOAT> queued: frag <N>/<N>; <N> sensors; <N> bytes (double-encrypted)
+           e.g. [BB] t=360 [AGG] 5.2 queued: frag 1/1; 1 sensors; 13 bytes (double-encrypted)
+           e.g. [BB] t=370 [AGG] 5.2 queued: frag 1/1; 4 sensors; 37 bytes (double-encrypted)
+[   4774] [BB]                           t=<N> [AGG] Cleared sensorTable (<N> sensors) - ready for next collection period
+           e.g. [BB] t=360 [AGG] Cleared sensorTable (1 sensors) - ready for next collection period
+           e.g. [BB] t=370 [AGG] Cleared sensorTable (4 sensors) - ready for next collection period
+[   4748] [CENSUS_INITIATE]              suspect=<HEX> trust=<FLOAT> pollUID=<HEX>
+           e.g. t=4 [CENSUS_INITIATE] suspect=FF0D trust=10.0 pollUID=5070
+           e.g. t=15 [CENSUS_INITIATE] suspect=FF0D trust=10.0 pollUID=2847
+[   4729] [AGG]                          Next aggregation at t=<N>
+           e.g. t=360 [AGG] Next aggregation at t=370
+           e.g. t=370 [AGG] Next aggregation at t=380
+[   4729] [BB]                           t=<N> [AGG] Next aggregation at t=<N>
+           e.g. [BB] t=360 [AGG] Next aggregation at t=370
+           e.g. [BB] t=370 [AGG] Next aggregation at t=380
+[   4523] [BB]                           t=<HEX> [RX_FWD] Encrypted CH_HELLO.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. [BB] t=1002 [RX_FWD] Encrypted CH_HELLO.2 from Child FF03 -> Queue for Parent FF0D
+           e.g. [BB] t=1004 [RX_FWD] Encrypted CH_HELLO.2 from Child FF03 -> Queue for Parent FF0D
+[   4523] [BB]                           t=<HEX> [Q_FWD] Queued CH_HELLO.<N> (size=<N>/<N>)
+           e.g. [BB] t=1002 [Q_FWD] Queued CH_HELLO.2 (size=1/15)
+           e.g. [BB] t=1004 [Q_FWD] Queued CH_HELLO.2 (size=2/15)
+[   4504] [AC]                           t=<HEX> [<FLOAT>_TX] ACK -> <HEX>
+           e.g. [AC] t=1000 [5.3_TX] ACK -> AA09
+           e.g. [AC] t=1003 [5.3_TX] ACK -> AA09
+[   4503] [5.3_RX]                       ACK from <HEX>
+           e.g. t=359 [5.3_RX] ACK from FF0A
+           e.g. t=366 [5.3_RX] ACK from FF0A
+[   4323] [PHY]                          Neighbour count: <N>-><N>
+           e.g. t=4 [PHY] Neighbour count: 2->3
+           e.g. t=5 [PHY] Neighbour count: 3->4
+[   4244] [AC]                           t=<HEX> [HELLO_TX] bcast battery=<FLOAT>%
+           e.g. [AC] t=1002 [HELLO_TX] bcast battery=100.0%
+           e.g. [AC] t=1007 [HELLO_TX] bcast battery=100.0%
+[   3698] [RX]                           SENSOR <- <HEX>
+           e.g. t=356 [RX] SENSOR <- 0027
+           e.g. t=358 [RX] SENSOR <- 0048
+[   3390] [SENSOR_RX]                    NEW <HEX> val=<N> bat=<N>% (table=<N> sensors)
+           e.g. t=356 [SENSOR_RX] NEW 0027 val=47 bat=99% (table=1 sensors)
+           e.g. t=358 [SENSOR_RX] NEW 0048 val=48 bat=99% (table=1 sensors)
+[   3214] [AGG]                          Next aggregation at t=<HEX>
+           e.g. t=990 [AGG] Next aggregation at t=1000
+           e.g. t=998 [AGG] Next aggregation at t=1005
+[   3192] [5.2_DROPPED]                  seq=<N> after <N> retries
+           e.g. t=483 [5.2_DROPPED] seq=216 after 3 retries
+           e.g. t=370 [5.2_DROPPED] seq=103 after 3 retries
+[   3169] [BB]                           t=<HEX> [AGG] Creating <FLOAT> with <N> sensors
+           e.g. [BB] t=1000 [AGG] Creating 5.2 with 10 sensors
+           e.g. [BB] t=1010 [AGG] Creating 5.2 with 9 sensors
+[   3169] [BB]                           t=<HEX> [AGG] <FLOAT> queued: frag <N>/<N>; <N> sensors; <N> bytes (double-encrypted)
+           e.g. [BB] t=1000 [AGG] 5.2 queued: frag 1/2; 8 sensors; 69 bytes (double-encrypted)
+           e.g. [BB] t=1010 [AGG] 5.2 queued: frag 1/2; 8 sensors; 69 bytes (double-encrypted)
+[   3169] [BB]                           t=<HEX> [AGG] Next aggregation at t=<HEX>
+           e.g. [BB] t=1000 [AGG] Next aggregation at t=1010
+           e.g. [BB] t=1010 [AGG] Next aggregation at t=1020
+[   3169] [BB]                           t=<HEX> [AGG] Cleared sensorTable (<N> sensors) - ready for next collection period
+           e.g. [BB] t=1000 [AGG] Cleared sensorTable (8 sensors) - ready for next collection period
+           e.g. [BB] t=1010 [AGG] Cleared sensorTable (8 sensors) - ready for next collection period
+[   3154] [BB]                           t=<HEX> [PHASE_TX] IDLE (queues empty)
+           e.g. [BB] t=1000 [PHASE_TX] IDLE (queues empty)
+           e.g. [BB] t=1001 [PHASE_TX] IDLE (queues empty)
+[   2832] [5.2_PARSE]                    Incomplete entry <N>/<N> in group <N> at offset <N> (payload=<N> bytes)
+           e.g. t=363 [5.2_PARSE] Incomplete entry 2/254 in group 254 at offset 14 (payload=15 bytes)
+           e.g. t=363 [5.2_PARSE] Incomplete entry 1/156 in group 250 at offset 16 (payload=15 bytes)
+[   2773] [HELLO_RX]                     NEW <HEX> tier=<N>(CH) verified=<N> rssi=<FLOAT>
+           e.g. t=39 [HELLO_RX] NEW AA01 tier=2(CH) verified=0 rssi=0.3
+           e.g. t=29 [HELLO_RX] NEW AA01 tier=2(CH) verified=0 rssi=0.4
+[   2760] [RX_FWD]                       Encrypted CMD.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. t=46 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent FF0D
+           e.g. t=66 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent FF0D
+[   2760] [Q_FWD]                        Queued CMD.<N> (size=<N>/<N>)
+           e.g. t=46 [Q_FWD] Queued CMD.5 (size=1/15)
+           e.g. t=66 [Q_FWD] Queued CMD.5 (size=2/15)
+[   2756] [PHASE_TX]                     Sent CMD.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. t=201 [PHASE_TX] Sent CMD.5 -> FF0D (Q_fwd=3; Q_local=0)
+           e.g. t=202 [PHASE_TX] Sent CMD.5 -> FF0D (Q_fwd=2; Q_local=0)
+[   2694] [5.2_RX]                       from <HEX> frag <N>/<N>; sending <FLOAT> ACK
+           e.g. t=479 [5.2_RX] from AA05 frag 1/1; sending 5.3 ACK
+           e.g. t=487 [5.2_RX] from AA05 frag 1/1; sending 5.3 ACK
+[   2694] [5.2_MERGE]                    Fragment <N>/<N> with <N> sensors
+           e.g. t=479 [5.2_MERGE] Fragment 1/1 with 1 sensors
+           e.g. t=487 [5.2_MERGE] Fragment 1/1 with 2 sensors
+[   2643] [AC]                           t=<N> [<FLOAT>_RX] ACK from <HEX>
+           e.g. [AC] t=359 [5.3_RX] ACK from FF0A
+           e.g. [AC] t=366 [5.3_RX] ACK from FF0A
+[   2609] [LOCK][SET]                    partner=<HEX> timeout=<N>
+           e.g. [LOCK][SET] partner=FF0D timeout=6
+           e.g. [LOCK][SET] partner=FF0D timeout=6
+[   2532] [5.2_FRAG]                     Processing fragment <N>/<N> with <N> RSSI groups from <HEX> (original: <HEX>)
+           e.g. t=359 [5.2_FRAG] Processing fragment 1/1 with 1 RSSI groups from FF01 (original: FF01)
+           e.g. t=363 [5.2_FRAG] Processing fragment 0/250 with 254 RSSI groups from FF01 (original: FF01)
+[   2407] [5.3_RX]                       ACK for fragment <N>/<N>
+           e.g. t=360 [5.3_RX] ACK for fragment 1/1
+           e.g. t=368 [5.3_RX] ACK for fragment 1/1
+[   2276] [SINK]                         Received encrypted CH_HELLO.<N> from child <HEX> - TERMINATING
+           e.g. t=273 [SINK] Received encrypted CH_HELLO.1 from child FF01 - TERMINATING
+           e.g. t=291 [SINK] Received encrypted CH_HELLO.1 from child FF01 - TERMINATING
+[   2239] [AC]                           t=<N> [RX] SENSOR <- <HEX>
+           e.g. [AC] t=356 [RX] SENSOR <- 0027
+           e.g. [AC] t=358 [RX] SENSOR <- 0048
+[   2151] [HELLO]                        NEW <HEX> tier=<N> verified=<N>
+           e.g. t=4 [HELLO] NEW 004D tier=1 verified=0
+           e.g. t=5 [HELLO] NEW 0008 tier=1 verified=0
+[   2136] [5.2_RX]                       NEW sensor <HEX> [GROUP<N>] val=<N> bat=<N>% rssi=-<N>dBm via <HEX>
+           e.g. t=363 [5.2_RX] NEW sensor FEFC [GROUP254] val=65177 bat=100% rssi=-208dBm via FF01
+           e.g. t=369 [5.2_RX] NEW sensor 002E [GROUP105] val=8 bat=1% rssi=-102dBm via FF01
+[   2056] [AC]                           t=<N> [SENSOR_RX] NEW <HEX> val=<N> bat=<N>% (table=<N> sensors)
+           e.g. [AC] t=356 [SENSOR_RX] NEW 0027 val=47 bat=99% (table=1 sensors)
+           e.g. [AC] t=358 [SENSOR_RX] NEW 0048 val=48 bat=99% (table=1 sensors)
+[   1978] [BB]                           t=<N> [RX_FWD] Encrypted CMD.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. [BB] t=46 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent FF0D
+           e.g. [BB] t=66 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent FF0D
+[   1978] [BB]                           t=<N> [Q_FWD] Queued CMD.<N> (size=<N>/<N>)
+           e.g. [BB] t=46 [Q_FWD] Queued CMD.5 (size=1/15)
+           e.g. [BB] t=66 [Q_FWD] Queued CMD.5 (size=2/15)
+[   1975] [BB]                           t=<N> [PHASE_TX] Sent CMD.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=201 [PHASE_TX] Sent CMD.5 -> FF0D (Q_fwd=3; Q_local=0)
+           e.g. [BB] t=202 [PHASE_TX] Sent CMD.5 -> FF0D (Q_fwd=2; Q_local=0)
+[   1895] [PHY]                          Neighbor count=<N>
+           e.g. t=2 [PHY] Neighbor count=1
+           e.g. t=4 [PHY] Neighbor count=2
+[   1860] [AC]                           t=<HEX> [<FLOAT>_RX] ACK from <HEX>
+           e.g. [AC] t=1002 [5.3_RX] ACK from FF0A
+           e.g. [AC] t=1014 [5.3_RX] ACK from FF0A
+[   1526] [RX]                           CMD.<N> <- <HEX> RSSI=<FLOAT>
+           e.g. t=22 [RX] CMD.0 <- FF0D RSSI=8.9
+           e.g. t=26 [RX] CMD.2 <- FF0D RSSI=8.9
+[   1519] [ENC_HELLO]                    TX: gwCh=<N>; chCh=<N>; sn=<N> (encrypted)
+           e.g. t=27 [ENC_HELLO] TX: gwCh=0; chCh=0; sn=0 (encrypted)
+           e.g. t=37 [ENC_HELLO] TX: gwCh=0; chCh=0; sn=0 (encrypted)
+[   1494] [HELLO_RX]                     NEW <HEX> tier=<N>(GWN) verified=<N> rssi=<FLOAT>
+           e.g. t=231 [HELLO_RX] NEW FF03 tier=3(GWN) verified=1 rssi=0.3
+           e.g. t=52 [HELLO_RX] NEW FF01 tier=3(GWN) verified=1 rssi=0.8
+[   1492] [BB]                           t=<N> [SINK] Received encrypted CH_HELLO.<N> from child <HEX> - TERMINATING
+           e.g. [BB] t=273 [SINK] Received encrypted CH_HELLO.1 from child FF01 - TERMINATING
+           e.g. [BB] t=291 [SINK] Received encrypted CH_HELLO.1 from child FF01 - TERMINATING
+[   1469] [5.3_RX]                       All <N> fragments ACKed
+           e.g. t=360 [5.3_RX] All 1 fragments ACKed
+           e.g. t=368 [5.3_RX] All 1 fragments ACKed
+[   1459] [AC]                           t=<HEX> [RX] SENSOR <- <HEX>
+           e.g. [AC] t=1005 [RX] SENSOR <- 0027
+           e.g. [AC] t=1008 [RX] SENSOR <- 002C
+[   1441] [5.2_PARSE]                    Incomplete group header at offset <N>
+           e.g. t=363 [5.2_PARSE] Incomplete group header at offset 16
+           e.g. t=365 [5.2_PARSE] Incomplete group header at offset 16
+[   1334] [AC]                           t=<HEX> [SENSOR_RX] NEW <HEX> val=<N> bat=<N>% (table=<N> sensors)
+           e.g. [AC] t=1005 [SENSOR_RX] NEW 0027 val=21 bat=97% (table=1 sensors)
+           e.g. [AC] t=1008 [SENSOR_RX] NEW 002C val=62 bat=98% (table=2 sensors)
+[   1332] [CH_REQ]                       (<N>/<N>) -> <HEX>
+           e.g. t=202 [CH_REQ] (1/5) -> FF01
+           e.g. t=207 [CH_REQ] (2/5) -> FF01
+[   1316] [TIMEOUT]                      Sent CH_REJECT to orphaned <HEX>
+           e.g. t=206 [TIMEOUT] Sent CH_REJECT to orphaned AA09
+           e.g. t=216 [TIMEOUT] Sent CH_REJECT to orphaned AA01
+[   1316] [LOCK][TIMEOUT]                partner=<HEX>
+           e.g. [LOCK][TIMEOUT] partner=AA09
+           e.g. [LOCK][TIMEOUT] partner=AA01
+[   1270] [BB]                           t=<N> [RX] CMD.<N> <- <HEX> RSSI=<FLOAT>
+           e.g. [BB] t=22 [RX] CMD.0 <- FF0D RSSI=8.9
+           e.g. [BB] t=26 [RX] CMD.2 <- FF0D RSSI=8.9
+[   1200] [TX]                           CMD.<N> -> <HEX>
+           e.g. t=22 [TX] CMD.1 -> FF0D
+           e.g. t=22 [TX] CMD.1 -> FF0D
+[   1198] [TIMEOUT]                      partner=<HEX> retry=<N>/<N>
+           e.g. t=206 [TIMEOUT] partner=FF01 retry=1/5
+           e.g. t=211 [TIMEOUT] partner=FF01 retry=2/5
+[   1198] [LOCK][CLEAR][TIMEOUT]         partner=<HEX>
+           e.g. [LOCK][CLEAR][TIMEOUT] partner=FF01
+           e.g. [LOCK][CLEAR][TIMEOUT] partner=FF01
+[   1146] [BB]                           t=<N> [ENC_HELLO] TX: gwCh=<N>; chCh=<N>; sn=<N> (encrypted)
+           e.g. [BB] t=27 [ENC_HELLO] TX: gwCh=0; chCh=0; sn=0 (encrypted)
+           e.g. [BB] t=37 [ENC_HELLO] TX: gwCh=0; chCh=0; sn=0 (encrypted)
+[   1144] [BB]                           t=<N> [TX] CMD.<N> -> <HEX>
+           e.g. [BB] t=22 [TX] CMD.1 -> FF0D
+           e.g. [BB] t=22 [TX] CMD.1 -> FF0D
+[   1112] [BB]                           [LOCK][SET] partner=<HEX> timeout=<N>
+           e.g. [BB] [LOCK][SET] partner=FF0D timeout=6
+           e.g. [BB] [LOCK][SET] partner=FF0D timeout=6
+[   1028] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [GRO:<N>; GRO:<N>; GRO:<N>; GRO:<N>]
+           e.g. t=375 [5.2_RX] Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:255; GRO:254; GRO:255; GRO:156]
+           e.g. t=405 [5.2_RX] Aggregated 2 sensors from FF01 (via FF01) | Groups: [GRO:255; GRO:254; GRO:255; GRO:156]
+[    948] [Q_LOCAL]                      Purged <N> oldest (overflow)
+           e.g. t=444 [Q_LOCAL] Purged 3 oldest (overflow)
+           e.g. t=454 [Q_LOCAL] Purged 3 oldest (overflow)
+[    936] [TX]                           HB.<N> -> <BCAST>
+           e.g. t=2 [TX] HB.0 -> <BCAST>
+           e.g. t=9 [TX] HB.0 -> <BCAST>
+[    840] [BB]                           t=<N> [TX] HB.<N> -> <BCAST>
+           e.g. [BB] t=2 [TX] HB.0 -> <BCAST>
+           e.g. [BB] t=9 [TX] HB.0 -> <BCAST>
+[    806] [5.2_SKIP]                     Invalid sensor ID <HEX> (is GWN/CH)
+           e.g. t=431 [5.2_SKIP] Invalid sensor ID FFF9 (is GWN/CH)
+           e.g. t=431 [5.2_SKIP] Invalid sensor ID FFFB (is GWN/CH)
+[    787] [5.2_GROUP]                    RSSI Group <N> (EXCELLENT): <N> sensors
+           e.g. t=381 [5.2_GROUP] RSSI Group 1 (EXCELLENT): 1 sensors
+           e.g. t=387 [5.2_GROUP] RSSI Group 1 (EXCELLENT): 1 sensors
+[    784] [BB]                           t=<HEX> [SINK] Received encrypted CH_HELLO.<N> from child <HEX> - TERMINATING
+           e.g. [BB] t=1000 [SINK] Received encrypted CH_HELLO.2 from child FF01 - TERMINATING
+           e.g. [BB] t=1001 [SINK] Received encrypted CH_HELLO.2 from child FF01 - TERMINATING
+[    782] [BB]                           t=<HEX> [RX_FWD] Encrypted CMD.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. [BB] t=1066 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent FF0D
+           e.g. [BB] t=1146 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent FF0D
+[    782] [BB]                           t=<HEX> [Q_FWD] Queued CMD.<N> (size=<N>/<N>)
+           e.g. [BB] t=1066 [Q_FWD] Queued CMD.5 (size=1/15)
+           e.g. [BB] t=1146 [Q_FWD] Queued CMD.5 (size=1/15)
+[    781] [BB]                           t=<HEX> [PHASE_TX] Sent CMD.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=1067 [PHASE_TX] Sent CMD.5 -> FF0D (Q_fwd=0; Q_local=14)
+           e.g. [BB] t=1149 [PHASE_TX] Sent CMD.5 -> FF0D (Q_fwd=0; Q_local=15)
+[    740] [5.2_TOKEN]                    Message associated with token #<N> from <HEX>
+           e.g. t=359 [5.2_TOKEN] Message associated with token #25599 from FF01
+           e.g. t=369 [5.2_TOKEN] Message associated with token #25375 from FF01
+[    738] [SECURITY]                     DROP ENC_HELLO from <HEX> - not in pendingChildren
+           e.g. t=55 [SECURITY] DROP ENC_HELLO from FF05 - not in pendingChildren
+           e.g. t=58 [SECURITY] DROP ENC_HELLO from FF05 - not in pendingChildren
+[    702] [ENC_HELLO]                    Registry refresh #<N> sent (next at t=<N>)
+           e.g. t=177 [ENC_HELLO] Registry refresh #1 sent (next at t=257)
+           e.g. t=249 [ENC_HELLO] Registry refresh #1 sent (next at t=329)
+[    702] [BB]                           t=<N> [ENC_HELLO] Registry refresh #<N> sent (next at t=<N>)
+           e.g. [BB] t=177 [ENC_HELLO] Registry refresh #1 sent (next at t=257)
+           e.g. [BB] t=249 [ENC_HELLO] Registry refresh #1 sent (next at t=329)
+[    665] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [EXC:<N>]
+           e.g. t=381 [5.2_RX] Aggregated 1 sensors from FF01 (via FF01) | Groups: [EXC:1]
+           e.g. t=387 [5.2_RX] Aggregated 1 sensors from FF01 (via FF01) | Groups: [EXC:1]
+[    647] [LOCK][REFRESH]                partner=<HEX> timeout=<N>
+           e.g. [LOCK][REFRESH] partner=FF0D timeout=6
+           e.g. [LOCK][REFRESH] partner=FF0D timeout=6
+[    558] [BB]                           [LOCK][REFRESH] partner=<HEX> timeout=<N>
+           e.g. [BB] [LOCK][REFRESH] partner=FF0D timeout=6
+           e.g. [BB] [LOCK][REFRESH] partner=FF0D timeout=6
+[    550] [BB]                           t=<N> [Q_LOCAL] Purged <N> oldest (overflow)
+           e.g. [BB] t=444 [Q_LOCAL] Purged 3 oldest (overflow)
+           e.g. [BB] t=454 [Q_LOCAL] Purged 3 oldest (overflow)
+[    526] [BB]                           t=<N> [SECURITY] DROP ENC_HELLO from <HEX> - not in pendingChildren
+           e.g. [BB] t=55 [SECURITY] DROP ENC_HELLO from FF05 - not in pendingChildren
+           e.g. [BB] t=58 [SECURITY] DROP ENC_HELLO from FF05 - not in pendingChildren
+[    504] [HANDSHAKE]                    Lock set with <HEX> (timer=<N>)
+           e.g. t=22 [HANDSHAKE] Lock set with FF0D (timer=6)
+           e.g. t=31 [HANDSHAKE] Lock set with FF03 (timer=6)
+[    488] [BB]                           t=<N> [HANDSHAKE] Lock set with <HEX> (timer=<N>)
+           e.g. [BB] t=22 [HANDSHAKE] Lock set with FF0D (timer=6)
+           e.g. [BB] t=31 [HANDSHAKE] Lock set with FF03 (timer=6)
+[    484] [SENSOR_RX]                    NEW <HEX> val=<N> bat=<N>%
+           e.g. t=355 [SENSOR_RX] NEW 0060 val=55 bat=99%
+           e.g. t=361 [SENSOR_RX] NEW 0013 val=55 bat=99%
+[    480] [SINK]                         Received encrypted CMD.<N> from child <HEX> - TERMINATING
+           e.g. t=37 [SINK] Received encrypted CMD.5 from child FF01 - TERMINATING
+           e.g. t=94 [SINK] Received encrypted CMD.5 from child FF04 - TERMINATING
+[    467] [5.3_RX]                       ACK for seq=<N>
+           e.g. t=395 [5.3_RX] ACK for seq=129
+           e.g. t=402 [5.3_RX] ACK for seq=141
+[    419] [ENC_HELLO]                    Registry refresh #<N> sent (next at t=<HEX>)
+           e.g. t=977 [ENC_HELLO] Registry refresh #11 sent (next at t=1057)
+           e.g. t=969 [ENC_HELLO] Registry refresh #10 sent (next at t=1049)
+[    406] [PARENT_CHANGE]                <HEX> -> <HEX>
+           e.g. t=397 [PARENT_CHANGE] AA03 -> AA06
+           e.g. t=409 [PARENT_CHANGE] AA0B -> AA02
+[    403] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [GRO:<N>; GRO:<N>]
+           e.g. t=363 [5.2_RX] Aggregated 1 sensors from FF01 (via FF01) | Groups: [GRO:254; GRO:156]
+           e.g. t=365 [5.2_RX] Aggregated 1 sensors from FF01 (via FF01) | Groups: [GRO:254; GRO:255]
+[    398] [BB]                           t=<HEX> [Q_LOCAL] Purged <N> oldest (overflow)
+           e.g. [BB] t=1006 [Q_LOCAL] Purged 3 oldest (overflow)
+           e.g. [BB] t=1014 [Q_LOCAL] Purged 3 oldest (overflow)
+[    384] [RECRUIT]                      INIT(<N>/<N>) -> <HEX>
+           e.g. t=31 [RECRUIT] INIT(1/4) -> FF03
+           e.g. t=103 [RECRUIT] INIT(1/4) -> FF0C
+[    376] [BB]                           t=<N> [SINK] Received encrypted CMD.<N> from child <HEX> - TERMINATING
+           e.g. [BB] t=37 [SINK] Received encrypted CMD.5 from child FF01 - TERMINATING
+           e.g. [BB] t=94 [SINK] Received encrypted CMD.5 from child FF04 - TERMINATING
+[    373] [BB]                           t=<HEX> [ENC_HELLO] TX: gwCh=<N>; chCh=<N>; sn=<N> (encrypted)
+           e.g. [BB] t=1057 [ENC_HELLO] TX: gwCh=1; chCh=2; sn=11 (encrypted)
+           e.g. [BB] t=1137 [ENC_HELLO] TX: gwCh=1; chCh=2; sn=10 (encrypted)
+[    359] [BB]                           t=<HEX> [ENC_HELLO] Registry refresh #<N> sent (next at t=<HEX>)
+           e.g. [BB] t=1057 [ENC_HELLO] Registry refresh #12 sent (next at t=1137)
+           e.g. [BB] t=1137 [ENC_HELLO] Registry refresh #13 sent (next at t=1217)
+[    320] [HANDSHAKE]                    Lock cleared (was with <HEX>)
+           e.g. t=27 [HANDSHAKE] Lock cleared (was with FF0D)
+           e.g. t=38 [HANDSHAKE] Lock cleared (was with FF03)
+[    312] [BB]                           t=<N> [HANDSHAKE] Lock cleared (was with <HEX>)
+           e.g. [BB] t=27 [HANDSHAKE] Lock cleared (was with FF0D)
+           e.g. [BB] t=38 [HANDSHAKE] Lock cleared (was with FF03)
+[    308] [SENSOR_RX]                    UPDATE <HEX> val=<N> bat=<N>%
+           e.g. t=486 [SENSOR_RX] UPDATE 0027 val=48 bat=99%
+           e.g. t=380 [SENSOR_RX] UPDATE 0005 val=55 bat=99%
+[    298] [SINK]                         FORWARDED ENC_HELLO: orig=<HEX> via <HEX>
+           e.g. t=94 [SINK] FORWARDED ENC_HELLO: orig=FF0A via FF04
+           e.g. t=201 [SINK] FORWARDED ENC_HELLO: orig=FF03 via FF01
+[    288] [ENC_HELLO]                    Retry <N>/<N> sent (next at t=<N>)
+           e.g. t=37 [ENC_HELLO] Retry 1/3 sent (next at t=57)
+           e.g. t=57 [ENC_HELLO] Retry 2/3 sent (next at t=97)
+[    288] [BB]                           t=<N> [ENC_HELLO] Retry <N>/<N> sent (next at t=<N>)
+           e.g. [BB] t=37 [ENC_HELLO] Retry 1/3 sent (next at t=57)
+           e.g. [BB] t=57 [ENC_HELLO] Retry 2/3 sent (next at t=97)
+[    270] [5.2_GROUP]                    RSSI Group <N> (FAIR): <N> sensors
+           e.g. t=364 [5.2_GROUP] RSSI Group 3 (FAIR): 1 sensors
+           e.g. t=377 [5.2_GROUP] RSSI Group 3 (FAIR): 4 sensors
+[    270] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [FAI:<N>]
+           e.g. t=364 [5.2_RX] Aggregated 1 sensors from FF01 (via FF01) | Groups: [FAI:1]
+           e.g. t=377 [5.2_RX] Aggregated 4 sensors from FF01 (via FF01) | Groups: [FAI:4]
+[    269] [5.2_RX]                       NEW sensor <HEX> [FAIR] val=<N> bat=<N>% rssi=-<N>dBm via <HEX>
+           e.g. t=364 [5.2_RX] NEW sensor FEFE [FAIR] val=65180 bat=100% rssi=-21dBm via FF01
+           e.g. t=377 [5.2_RX] NEW sensor 01FF [FAIR] val=259 bat=1% rssi=-26dBm via FF01
+[    256] [BB]                           t=<HEX> [RX] CMD.<N> <- <HEX> RSSI=<FLOAT>
+           e.g. [BB] t=1007 [RX] CMD.5 <- FF05 RSSI=0.1
+           e.g. [BB] t=1019 [RX] CMD.5 <- FF05 RSSI=0.1
+[    230] [RX]                           CH_CMD.<N> <- <HEX>
+           e.g. t=202 [RX] CH_CMD.0 <- AA09
+           e.g. t=209 [RX] CH_CMD.2 <- AA09
+[    230] [AC]                           t=<N> [RX] CH_CMD.<N> <- <HEX>
+           e.g. [AC] t=202 [RX] CH_CMD.0 <- AA09
+           e.g. [AC] t=209 [RX] CH_CMD.2 <- AA09
+[    214] [RX_FWD]                       Encrypted HB.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. t=212 [RX_FWD] Encrypted HB.3 from Child FF06 -> Queue for Parent FF03
+           e.g. t=203 [RX_FWD] Encrypted HB.3 from Child FF07 -> Queue for Parent FF05
+[    214] [Q_FWD]                        Queued HB.<N> (size=<N>/<N>)
+           e.g. t=212 [Q_FWD] Queued HB.3 (size=4/15)
+           e.g. t=203 [Q_FWD] Queued HB.3 (size=6/15)
+[    214] [PHASE_TX]                     Sent HB.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. t=219 [PHASE_TX] Sent HB.3 -> FF03 (Q_fwd=3; Q_local=0)
+           e.g. t=212 [PHASE_TX] Sent HB.3 -> FF05 (Q_fwd=3; Q_local=0)
+[    212] [BB]                           t=<HEX> [SECURITY] DROP ENC_HELLO from <HEX> - not in pendingChildren
+           e.g. [BB] t=1007 [SECURITY] DROP ENC_HELLO from FF05 - not in pendingChildren
+           e.g. [BB] t=1019 [SECURITY] DROP ENC_HELLO from FF05 - not in pendingChildren
+[    208] [SCALE_EXHAUSTED]              Power <FLOAT> -> <FLOAT> (all neighbors rejected)
+           e.g. t=125 [SCALE_EXHAUSTED] Power 6.00 -> 6.60 (all neighbors rejected)
+           e.g. t=126 [SCALE_EXHAUSTED] Power 6.60 -> 7.26 (all neighbors rejected)
+[    201] [REJECT]                       <HEX> MAX_RETRIES=<N>
+           e.g. t=227 [REJECT] FF07 MAX_RETRIES=5
+           e.g. t=227 [REJECT] FF07 MAX_RETRIES=5
+[    190] [STATE]                        HANDSHAKE -> SECURE
+           e.g. t=38 [STATE] HANDSHAKE -> SECURE
+           e.g. t=48 [STATE] HANDSHAKE -> SECURE
+[    186] [LOCK][CLEAR][REJECT]          partner=<HEX>
+           e.g. [LOCK][CLEAR][REJECT] partner=FF0C
+           e.g. [LOCK][CLEAR][REJECT] partner=FF0C
+[    184] [BB]                           t=<N> [STATE] HANDSHAKE -> SECURE
+           e.g. [BB] t=38 [STATE] HANDSHAKE -> SECURE
+           e.g. [BB] t=48 [STATE] HANDSHAKE -> SECURE
+[    183] [AC]                           t=<N> [SENSOR_RX] UPDATE <HEX> val=<N> bat=<N>%
+           e.g. [AC] t=486 [SENSOR_RX] UPDATE 0027 val=48 bat=99%
+           e.g. [AC] t=380 [SENSOR_RX] UPDATE 0005 val=55 bat=99%
+[    176] [TX]                           HB.<N> -> <HEX>
+           e.g. t=58 [TX] HB.3 -> FF00
+           e.g. t=63 [TX] HB.3 -> FF00
+[    165] [SINK]                         ENC_HELLO from <HEX> (parent=<HEX>): sn=<N> gwCh=[<HEX>]  
+           e.g. t=97 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=0 gwCh=[FF03]  
+           e.g. t=111 [SINK] ENC_HELLO from FF04 (parent=FF0D): sn=0 gwCh=[FF0A]  
+[    164] [SINK]                         ENC_HELLO from <HEX> (parent=<HEX>): sn=<N>   
+           e.g. t=29 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=0   
+           e.g. t=37 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=0   
+[    160] [LOCK][CLEAR]                  partner=<HEX>
+           e.g. [LOCK][CLEAR] partner=FF08
+           e.g. [LOCK][CLEAR] partner=FF05
+[    160] [BB]                           [LOCK][CLEAR] partner=<HEX>
+           e.g. [BB] [LOCK][CLEAR] partner=FF08
+           e.g. [BB] [LOCK][CLEAR] partner=FF05
+[    150] [BB]                           [LOCK][CLEAR][REJECT] partner=<HEX>
+           e.g. [BB] [LOCK][CLEAR][REJECT] partner=FF0C
+           e.g. [BB] [LOCK][CLEAR][REJECT] partner=FF0C
+[    136] [REJ_PARENT]                   → <HEX>
+           e.g. t=116 [REJ_PARENT] → FF0C
+           e.g. t=123 [REJ_PARENT] → FF0C
+[    126] [BB]                           t=<N> [RX_FWD] Encrypted HB.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. [BB] t=212 [RX_FWD] Encrypted HB.3 from Child FF06 -> Queue for Parent FF03
+           e.g. [BB] t=203 [RX_FWD] Encrypted HB.3 from Child FF07 -> Queue for Parent FF05
+[    126] [BB]                           t=<N> [Q_FWD] Queued HB.<N> (size=<N>/<N>)
+           e.g. [BB] t=212 [Q_FWD] Queued HB.3 (size=4/15)
+           e.g. [BB] t=203 [Q_FWD] Queued HB.3 (size=6/15)
+[    126] [BB]                           t=<N> [PHASE_TX] Sent HB.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=219 [PHASE_TX] Sent HB.3 -> FF03 (Q_fwd=3; Q_local=0)
+           e.g. [BB] t=212 [PHASE_TX] Sent HB.3 -> FF05 (Q_fwd=3; Q_local=0)
+[    125] [AC]                           t=<HEX> [SENSOR_RX] UPDATE <HEX> val=<N> bat=<N>%
+           e.g. [AC] t=1010 [SENSOR_RX] UPDATE 0027 val=24 bat=97%
+           e.g. [AC] t=1091 [SENSOR_RX] UPDATE 0027 val=12 bat=97%
+[    124] [LOCK][CLEAR][SUCCESS]         partner=<HEX>
+           e.g. [LOCK][CLEAR][SUCCESS] partner=FF01
+           e.g. [LOCK][CLEAR][SUCCESS] partner=FF04
+[    120] [HANDSHAKE]                    <HEX> added to pendingChildren (awaiting ENC_HELLO)
+           e.g. t=33 [HANDSHAKE] FF03 added to pendingChildren (awaiting ENC_HELLO)
+           e.g. t=42 [HANDSHAKE] FF05 added to pendingChildren (awaiting ENC_HELLO)
+[    120] [PHASE]                        Sending phaseOffset=<N> to child <HEX> (self=<N>)
+           e.g. t=33 [PHASE] Sending phaseOffset=0 to child FF03 (self=1)
+           e.g. t=42 [PHASE] Sending phaseOffset=1 to child FF05 (self=0)
+[    118] [CH_ACK]                       -> <HEX> (sending key)
+           e.g. t=202 [CH_ACK] -> AA09 (sending key)
+           e.g. t=212 [CH_ACK] -> AA01 (sending key)
+[    118] [AC]                           [LOCK][SET] partner=<HEX> timeout=<N>
+           e.g. [AC] [LOCK][SET] partner=AA09 timeout=4
+           e.g. [AC] [LOCK][SET] partner=AA01 timeout=4
+[    118] [AC]                           t=<N> [CH_ACK] -> <HEX> (sending key)
+           e.g. [AC] t=202 [CH_ACK] -> AA09 (sending key)
+           e.g. [AC] t=212 [CH_ACK] -> AA01 (sending key)
+[    118] [AC]                           t=<N> [TIMEOUT] Sent CH_REJECT to orphaned <HEX>
+           e.g. [AC] t=206 [TIMEOUT] Sent CH_REJECT to orphaned AA09
+           e.g. [AC] t=216 [TIMEOUT] Sent CH_REJECT to orphaned AA01
+[    118] [AC]                           [LOCK][TIMEOUT] partner=<HEX>
+           e.g. [AC] [LOCK][TIMEOUT] partner=AA09
+           e.g. [AC] [LOCK][TIMEOUT] partner=AA01
+[    118] [REJECT]                       Neighbor <HEX> marked REJECT
+           e.g. t=48 [REJECT] Neighbor FF0D marked REJECT
+           e.g. t=105 [REJECT] Neighbor FF0C marked REJECT
+[    115] [PANIC_TX]                     type=<N> sev=<N> val=<N> -> <HEX>
+           e.g. t=668 [PANIC_TX] type=1 sev=1 val=68 -> AA0A
+           e.g. t=562 [PANIC_TX] type=0 sev=1 val=6 -> AA07
+[    112] [PARENT]                       Set parent -> <HEX>
+           e.g. t=26 [PARENT] Set parent -> FF0D
+           e.g. t=43 [PARENT] Set parent -> FF0D
+[    112] [BB]                           t=<N> [HANDSHAKE] <HEX> added to pendingChildren (awaiting ENC_HELLO)
+           e.g. [BB] t=33 [HANDSHAKE] FF03 added to pendingChildren (awaiting ENC_HELLO)
+           e.g. [BB] t=42 [HANDSHAKE] FF05 added to pendingChildren (awaiting ENC_HELLO)
+[    112] [BB]                           t=<N> [PHASE] Sending phaseOffset=<N> to child <HEX> (self=<N>)
+           e.g. [BB] t=33 [PHASE] Sending phaseOffset=0 to child FF03 (self=1)
+           e.g. [BB] t=42 [PHASE] Sending phaseOffset=1 to child FF05 (self=0)
+[    112] [BB]                           t=<N> [REJECT] Neighbor <HEX> marked REJECT
+           e.g. [BB] t=48 [REJECT] Neighbor FF0D marked REJECT
+           e.g. [BB] t=105 [REJECT] Neighbor FF0C marked REJECT
+[    110] [RX]                           PARENT_REJECT from <HEX>; trying next
+           e.g. t=105 [RX] PARENT_REJECT from FF0C; trying next
+           e.g. t=108 [RX] PARENT_REJECT from FF03; trying next
+[    106] [STATE]                        DISCOVERY -> HANDSHAKE
+           e.g. t=22 [STATE] DISCOVERY -> HANDSHAKE
+           e.g. t=39 [STATE] DISCOVERY -> HANDSHAKE
+[    104] [PHASE]                        Inherited phaseOffset=<N> from parent <HEX>
+           e.g. t=27 [PHASE] Inherited phaseOffset=1 from parent FF0D
+           e.g. t=99 [PHASE] Inherited phaseOffset=1 from parent FF0A
+[    104] [BB]                           t=<N> [STATE] DISCOVERY -> HANDSHAKE
+           e.g. [BB] t=22 [STATE] DISCOVERY -> HANDSHAKE
+           e.g. [BB] t=39 [STATE] DISCOVERY -> HANDSHAKE
+[    104] [BB]                           t=<N> [PARENT] Set parent -> <HEX>
+           e.g. [BB] t=26 [PARENT] Set parent -> FF0D
+           e.g. [BB] t=43 [PARENT] Set parent -> FF0D
+[    104] [BB]                           t=<N> [TX] HB.<N> -> <HEX>
+           e.g. [BB] t=58 [TX] HB.3 -> FF00
+           e.g. [BB] t=63 [TX] HB.3 -> FF00
+[    104] [BB]                           t=<HEX> [SINK] Received encrypted CMD.<N> from child <HEX> - TERMINATING
+           e.g. [BB] t=1031 [SINK] Received encrypted CMD.5 from child FF04 - TERMINATING
+           e.g. [BB] t=1042 [SINK] Received encrypted CMD.5 from child FF04 - TERMINATING
+[    102] [TIMEOUT]                      Attempt <N>/<N> for <HEX> - will retry
+           e.g. t=118 [TIMEOUT] Attempt 1/4 for FF08 - will retry
+           e.g. t=48 [TIMEOUT] Attempt 1/4 for FF05 - will retry
+[     98] [LOCK][CLEAR][ENC_HELLO_TX]    partner=<HEX>
+           e.g. [LOCK][CLEAR][ENC_HELLO_TX] partner=FF0D
+           e.g. [LOCK][CLEAR][ENC_HELLO_TX] partner=FF0A
+[     98] [BB]                           [LOCK][CLEAR][ENC_HELLO_TX] partner=<HEX>
+           e.g. [BB] [LOCK][CLEAR][ENC_HELLO_TX] partner=FF0D
+           e.g. [BB] [LOCK][CLEAR][ENC_HELLO_TX] partner=FF0A
+[     96] [STATE]                        BOOT→DISCOVERY (neighbors=<N>)
+           e.g. t=22 [STATE] BOOT→DISCOVERY (neighbors=13)
+           e.g. t=22 [STATE] BOOT→DISCOVERY (neighbors=9)
+[     96] [BB]                           t=<N> [PHASE] Inherited phaseOffset=<N> from parent <HEX>
+           e.g. [BB] t=27 [PHASE] Inherited phaseOffset=1 from parent FF0D
+           e.g. [BB] t=99 [PHASE] Inherited phaseOffset=1 from parent FF0A
+[     96] [BB]                           t=<HEX> [TX] HB.<N> -> <BCAST>
+           e.g. [BB] t=1584 [TX] HB.1 -> <BCAST>
+           e.g. [BB] t=1591 [TX] HB.1 -> <BCAST>
+[     93] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [EXC:<N>; GRO:<N>]
+           e.g. t=489 [5.2_RX] Aggregated 8 sensors from FF01 (via FF01) | Groups: [EXC:1; GRO:248]
+           e.g. t=496 [5.2_RX] Aggregated 3 sensors from FF01 (via FF01) | Groups: [EXC:1; GRO:2]
+[     90] [CH_REJECT]                    from <HEX>
+           e.g. t=217 [CH_REJECT] from FF01
+           e.g. t=230 [CH_REJECT] from FF03
+[     89] [CH_ACK]                       Received key from <HEX>
+           e.g. t=223 [CH_ACK] Received key from FF03
+           e.g. t=239 [CH_ACK] Received key from FF01
+[     89] [KEY_ACK]                      -> <HEX> (encrypted)
+           e.g. t=223 [KEY_ACK] -> FF03 (encrypted)
+           e.g. t=239 [KEY_ACK] -> FF01 (encrypted)
+[     89] [VERIFIED]                     parent=GWN <HEX> (localKey set; encrypted comms)
+           e.g. t=223 [VERIFIED] parent=GWN FF03 (localKey set; encrypted comms)
+           e.g. t=239 [VERIFIED] parent=GWN FF01 (localKey set; encrypted comms)
+[     88] [STATE]                        BOOT->DISCOVERY
+           e.g. t=200 [STATE] BOOT->DISCOVERY
+           e.g. t=200 [STATE] BOOT->DISCOVERY
+[     88] [BB]                           t=<HEX> [RX_FWD] Encrypted HB.<N> from Child <HEX> -> Queue for Parent <HEX>
+           e.g. [BB] t=1069 [RX_FWD] Encrypted HB.3 from Child FF03 -> Queue for Parent FF0D
+           e.g. [BB] t=1006 [RX_FWD] Encrypted HB.3 from Child FF0A -> Queue for Parent FF0D
+[     88] [BB]                           t=<HEX> [Q_FWD] Queued HB.<N> (size=<N>/<N>)
+           e.g. [BB] t=1069 [Q_FWD] Queued HB.3 (size=1/15)
+           e.g. [BB] t=1006 [Q_FWD] Queued HB.3 (size=1/15)
+[     88] [BB]                           t=<HEX> [PHASE_TX] Sent HB.<N> -> <HEX> (Q_fwd=<N>; Q_local=<N>)
+           e.g. [BB] t=1071 [PHASE_TX] Sent HB.3 -> FF0D (Q_fwd=0; Q_local=14)
+           e.g. [BB] t=1007 [PHASE_TX] Sent HB.3 -> FF0D (Q_fwd=0; Q_local=1)
+[     85] [DISCO]                        Found verified GWN <HEX>
+           e.g. t=201 [DISCO] Found verified GWN FF01
+           e.g. t=201 [DISCO] Found verified GWN FF07
+[     84] [AGG]                          Initialized: period=<N>; first TX at t=<N>
+           e.g. t=350 [AGG] Initialized: period=10; first TX at t=360
+           e.g. t=350 [AGG] Initialized: period=7; first TX at t=357
+[     84] [BB]                           t=<N> [AGG] Initialized: period=<N>; first TX at t=<N>
+           e.g. [BB] t=350 [AGG] Initialized: period=10; first TX at t=360
+           e.g. [BB] t=350 [AGG] Initialized: period=7; first TX at t=357
+[     83] [SINK]                         ENC_HELLO from <HEX> (parent=<HEX>): sn=<N>  chCh=[<HEX>] 
+           e.g. t=267 [SINK] ENC_HELLO from FF03 (parent=FF01): sn=0  chCh=[AA01] 
+           e.g. t=347 [SINK] ENC_HELLO from FF03 (parent=FF01): sn=0  chCh=[AA01] 
+[     77] [SINK]                         ENC_HELLO from <HEX> (parent=<HEX>): sn=<N> gwCh=[<HEX>] chCh=[<HEX>;<HEX>] 
+           e.g. t=337 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=0 gwCh=[FF03] chCh=[AA09;AA01] 
+           e.g. t=417 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=7 gwCh=[FF03] chCh=[AA09;AA01] 
+[     74] [HANDSHAKE]                    <HEX> promoted to children (ENC_HELLO received)
+           e.g. t=38 [HANDSHAKE] FF03 promoted to children (ENC_HELLO received)
+           e.g. t=92 [HANDSHAKE] FF0A promoted to children (ENC_HELLO received)
+[     72] [LOCK][CLEAR][ENC_HELLO_RX]    partner=<HEX>
+           e.g. [LOCK][CLEAR][ENC_HELLO_RX] partner=FF03
+           e.g. [LOCK][CLEAR][ENC_HELLO_RX] partner=FF0A
+[     72] [RETRY]                        Reset retry state for <HEX> (now child)
+           e.g. t=38 [RETRY] Reset retry state for FF03 (now child)
+           e.g. t=92 [RETRY] Reset retry state for FF0A (now child)
+[     72] [BB]                           t=<N> [HANDSHAKE] <HEX> promoted to children (ENC_HELLO received)
+           e.g. [BB] t=38 [HANDSHAKE] FF03 promoted to children (ENC_HELLO received)
+           e.g. [BB] t=92 [HANDSHAKE] FF0A promoted to children (ENC_HELLO received)
+[     72] [BB]                           [LOCK][CLEAR][ENC_HELLO_RX] partner=<HEX>
+           e.g. [BB] [LOCK][CLEAR][ENC_HELLO_RX] partner=FF03
+           e.g. [BB] [LOCK][CLEAR][ENC_HELLO_RX] partner=FF0A
+[     72] [BB]                           t=<N> [RETRY] Reset retry state for <HEX> (now child)
+           e.g. [BB] t=38 [RETRY] Reset retry state for FF03 (now child)
+           e.g. [BB] t=92 [RETRY] Reset retry state for FF0A (now child)
+[     72] [BB]                           t=<HEX> [TX] HB.<N> -> <HEX>
+           e.g. [BB] t=1058 [TX] HB.3 -> FF00
+           e.g. [BB] t=1031 [TX] HB.3 -> FF00
+[     72] [RX_FWD]                       Encrypted CH_HELLO.<N> from Child <HEX> -> Queue for Parent <BCAST>
+           e.g. t=1584 [RX_FWD] Encrypted CH_HELLO.2 from Child FF03 -> Queue for Parent <BCAST>
+           e.g. t=1590 [RX_FWD] Encrypted CH_HELLO.2 from Child FF03 -> Queue for Parent <BCAST>
+[     72] [BB]                           t=<HEX> [RX_FWD] Encrypted CH_HELLO.<N> from Child <HEX> -> Queue for Parent <BCAST>
+           e.g. [BB] t=1584 [RX_FWD] Encrypted CH_HELLO.2 from Child FF03 -> Queue for Parent <BCAST>
+           e.g. [BB] t=1590 [RX_FWD] Encrypted CH_HELLO.2 from Child FF03 -> Queue for Parent <BCAST>
+[     71] [DVS]                          Power scaled to <FLOAT> (attempt <N>/<N>) - retrying all neighbors
+           e.g. t=231 [DVS] Power scaled to 3.0 (attempt 1/2) - retrying all neighbors
+           e.g. t=231 [DVS] Power scaled to 3.0 (attempt 1/2) - retrying all neighbors
+[     64] [5.2_RX]                       NEW sensor <HEX> [EXCELLENT] val=<N> bat=<N>% rssi=-<N>dBm via <HEX>
+           e.g. t=381 [5.2_RX] NEW sensor 0103 [EXCELLENT] val=65439 bat=100% rssi=-156dBm via FF01
+           e.g. t=388 [5.2_RX] NEW sensor 0203 [EXCELLENT] val=257 bat=2% rssi=-3dBm via FF01
+[     60] [LOCK][CLEAR][CH_SUCCESS]      partner=<HEX>
+           e.g. [LOCK][CLEAR][CH_SUCCESS] partner=AA09
+           e.g. [LOCK][CLEAR][CH_SUCCESS] partner=AA01
+[     60] [CH_JOINED]                    <HEX> added to children
+           e.g. t=209 [CH_JOINED] AA09 added to children
+           e.g. t=225 [CH_JOINED] AA01 added to children
+[     60] [AC]                           [LOCK][CLEAR][CH_SUCCESS] partner=<HEX>
+           e.g. [AC] [LOCK][CLEAR][CH_SUCCESS] partner=AA09
+           e.g. [AC] [LOCK][CLEAR][CH_SUCCESS] partner=AA01
+[     60] [AC]                           t=<N> [CH_JOINED] <HEX> added to children
+           e.g. [AC] t=209 [CH_JOINED] AA09 added to children
+           e.g. [AC] t=225 [CH_JOINED] AA01 added to children
+[     60] [BB]                           t=<N> [ENC_HELLO] Registry refresh #<N> sent (next at t=<HEX>)
+           e.g. [BB] t=977 [ENC_HELLO] Registry refresh #11 sent (next at t=1057)
+           e.g. [BB] t=969 [ENC_HELLO] Registry refresh #10 sent (next at t=1049)
+[     56] [BB]                           t=<HEX> [TX] CMD.<N> -> <HEX>
+           e.g. [BB] t=1587 [TX] CMD.1 -> FF0C
+           e.g. [BB] t=1587 [TX] CMD.1 -> FF0C
+[     47] [CH_JOINOK]                    -> <HEX>
+           e.g. t=454 [CH_JOINOK] -> AA05
+           e.g. t=288 [CH_JOINOK] -> AA06
+[     47] [CHILD_ADDED]                  <HEX>
+           e.g. t=454 [CHILD_ADDED] AA05
+           e.g. t=288 [CHILD_ADDED] AA06
+[     47] [DROP][LOCK][TX]               type=<N> dst=<HEX> partner=<HEX>
+           e.g. [DROP][LOCK][TX] type=6 dst=FF04 partner=AA05
+           e.g. [DROP][LOCK][TX] type=6 dst=FF0C partner=AA06
+[     47] [CH_INFO]                      -> parent <HEX> (recruited <HEX>)
+           e.g. t=454 [CH_INFO] -> parent FF04 (recruited AA05)
+           e.g. t=288 [CH_INFO] -> parent FF0C (recruited AA06)
+[     45] [BB]                           t=<N> [AGG] Next aggregation at t=<HEX>
+           e.g. [BB] t=990 [AGG] Next aggregation at t=1000
+           e.g. [BB] t=998 [AGG] Next aggregation at t=1005
+[     38] [PURGE]                        parent <HEX> (rejected)
+           e.g. t=230 [PURGE] parent FF03 (rejected)
+           e.g. t=241 [PURGE] parent FF01 (rejected)
+[     35] [ORPHAN_MODE]                  No CH/GWN found - entering extended sleep (<N>%)
+           e.g. t=380 [ORPHAN_MODE] No CH/GWN found - entering extended sleep (75%)
+           e.g. t=390 [ORPHAN_MODE] No CH/GWN found - entering extended sleep (75%)
+[     35] [PANIC_TX]                     LINK_LOSS broadcast
+           e.g. t=380 [PANIC_TX] LINK_LOSS broadcast
+           e.g. t=390 [PANIC_TX] LINK_LOSS broadcast
+[     32] [SINK_TIMEOUT]                 Attempt <N>/<N> for <HEX> - will retry
+           e.g. t=37 [SINK_TIMEOUT] Attempt 2/4 for FF03 - will retry
+           e.g. t=47 [SINK_TIMEOUT] Attempt 2/4 for FF02 - will retry
+[     32] [5.2_GROUP]                    RSSI Group <N> (POOR): <N> sensors
+           e.g. t=665 [5.2_GROUP] RSSI Group 4 (POOR): 0 sensors
+           e.g. t=671 [5.2_GROUP] RSSI Group 4 (POOR): 0 sensors
+[     32] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [GRO:<N>; GRO:<N>; POO:<N>; GRO:<N>]
+           e.g. t=665 [5.2_RX] Aggregated 7 sensors from FF01 (via FF01) | Groups: [GRO:0; GRO:2; POO:0; GRO:99]
+           e.g. t=671 [5.2_RX] Aggregated 7 sensors from FF01 (via FF01) | Groups: [GRO:0; GRO:2; POO:0; GRO:99]
+[     29] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [GRO:<N>; EXC:<N>; GRO:<N>; GRO:<N>]
+           e.g. t=802 [5.2_RX] Aggregated 7 sensors from FF01 (via FF01) | Groups: [GRO:0; EXC:3; GRO:0; GRO:98]
+           e.g. t=803 [5.2_RX] Aggregated 7 sensors from FF01 (via FF01) | Groups: [GRO:0; EXC:3; GRO:0; GRO:98]
+[     28] [5.2_RX]                       NEW sensor <HEX> [FAIR] val=<N> bat=<N>% rssi=<N>dBm via <HEX>
+           e.g. t=377 [5.2_RX] NEW sensor 0169 [FAIR] val=25345 bat=100% rssi=0dBm via FF01
+           e.g. t=395 [5.2_RX] NEW sensor 017C [FAIR] val=25345 bat=100% rssi=0dBm via FF01
+[     23] [5.2_RX]                       NEW sensor <HEX> [GROUP<N>] val=<HEX> bat=<N>% rssi=-<N>dBm via <HEX>
+           e.g. t=489 [5.2_RX] NEW sensor 02FF [GROUP25] val=2051 bat=100% rssi=-25dBm via FF01
+           e.g. t=489 [5.2_RX] NEW sensor 02FF [GROUP25] val=2051 bat=100% rssi=-25dBm via FF01
+[     22] [ORPHAN_RECOVERED]             Found target <HEX>
+           e.g. t=576 [ORPHAN_RECOVERED] Found target AA08
+           e.g. t=529 [ORPHAN_RECOVERED] Found target AA08
+[     20] [PANIC_RX]                     *** ANOMALY *** sev=<N> from=<HEX> orig=<HEX> val=<N>
+           e.g. t=562 [PANIC_RX] *** ANOMALY *** sev=1 from=003D orig=003D val=6
+           e.g. t=658 [PANIC_RX] *** ANOMALY *** sev=1 from=004C orig=004C val=6
+[     20] [PANIC_FWD]                    -> parent <HEX> (TTL=<N>)
+           e.g. t=562 [PANIC_FWD] -> parent FF01 (TTL=0)
+           e.g. t=658 [PANIC_FWD] -> parent FF01 (TTL=0)
+[     19] [CH_JOINOK]                    from <HEX>
+           e.g. t=255 [CH_JOINOK] from AA0B
+           e.g. t=456 [CH_JOINOK] from AA08
+[     19] [VERIFIED]                     parent=CH <HEX> (no localKey; unencrypted comms)
+           e.g. t=255 [VERIFIED] parent=CH AA0B (no localKey; unencrypted comms)
+           e.g. t=456 [VERIFIED] parent=CH AA08 (no localKey; unencrypted comms)
+[     16] [TIMEOUT]                      Pending child <HEX> timed out (no ENC_HELLO) -> PARENT_REJECT
+           e.g. t=57 [TIMEOUT] Pending child FF02 timed out (no ENC_HELLO) -> PARENT_REJECT
+           e.g. t=70 [TIMEOUT] Pending child FF07 timed out (no ENC_HELLO) -> PARENT_REJECT
+[     16] [BB]                           [LOCK][CLEAR][SUCCESS] partner=<HEX>
+           e.g. [BB] [LOCK][CLEAR][SUCCESS] partner=FF01
+           e.g. [BB] [LOCK][CLEAR][SUCCESS] partner=FF04
+[     16] [SINK]                         Promoted <HEX> to children (DIRECT ENC_HELLO)
+           e.g. t=29 [SINK] Promoted FF01 to children (DIRECT ENC_HELLO)
+           e.g. t=83 [SINK] Promoted FF04 to children (DIRECT ENC_HELLO)
+[     16] [BB]                           t=<N> [TIMEOUT] Pending child <HEX> timed out (no ENC_HELLO) -> PARENT_REJECT
+           e.g. [BB] t=57 [TIMEOUT] Pending child FF02 timed out (no ENC_HELLO) -> PARENT_REJECT
+           e.g. [BB] t=70 [TIMEOUT] Pending child FF07 timed out (no ENC_HELLO) -> PARENT_REJECT
+[     16] [HELLO_RX]                     NEW <HEX> tier=<N>(UNK) verified=<N> rssi=<HEX>.<N>
+           e.g. t=62 [HELLO_RX] NEW 003D tier=1(UNK) verified=0 rssi=1268.0
+           e.g. t=83 [HELLO_RX] NEW 003A tier=1(UNK) verified=0 rssi=1268.0
+[     16] [BB]                           t=<HEX> [HANDSHAKE] Lock set with <HEX> (timer=<N>)
+           e.g. [BB] t=1587 [HANDSHAKE] Lock set with FF0C (timer=6)
+           e.g. [BB] t=1597 [HANDSHAKE] Lock set with FF0C (timer=6)
+[     14] [STATE]                        SECURE -> HANDSHAKE
+           e.g. t=94 [STATE] SECURE -> HANDSHAKE
+           e.g. t=94 [STATE] SECURE -> HANDSHAKE
+[     14] [ORPHAN_DETECT]                PARENT_INIT from parent <HEX> - clearing state
+           e.g. t=48 [ORPHAN_DETECT] PARENT_INIT from parent FF0D - clearing state
+           e.g. t=48 [ORPHAN_DETECT] PARENT_INIT from parent FF0D - clearing state
+[     14] [TIMEOUT]                      Purged <HEX> from pendingChildren
+           e.g. t=48 [TIMEOUT] Purged FF05 from pendingChildren
+           e.g. t=48 [TIMEOUT] Purged FF05 from pendingChildren
+[     14] [TIMEOUT]                      Sent PARENT_REJECT to pending <HEX>
+           e.g. t=48 [TIMEOUT] Sent PARENT_REJECT to pending FF05
+           e.g. t=48 [TIMEOUT] Sent PARENT_REJECT to pending FF05
+[     14] [SINK]                         CH_HELLO: CH <HEX> joined via GWN <HEX>
+           e.g. t=273 [SINK] CH_HELLO: CH AA01 joined via GWN FF03
+           e.g. t=291 [SINK] CH_HELLO: CH AA01 joined via GWN FF01
+[     10] [TIMEOUT]                      Will exhaust <N> retries for <HEX> - REJECTED
+           e.g. t=69 [TIMEOUT] Will exhaust 4 retries for FF05 - REJECTED
+           e.g. t=69 [TIMEOUT] Will exhaust 4 retries for FF05 - REJECTED
+[      8] [LOCK][CLEAR][COMPLETE]        partner=<HEX>
+           e.g. [LOCK][CLEAR][COMPLETE] partner=FF0D
+           e.g. [LOCK][CLEAR][COMPLETE] partner=FF0D
+[      8] [BB]                           [LOCK][CLEAR][COMPLETE] partner=<HEX>
+           e.g. [BB] [LOCK][CLEAR][COMPLETE] partner=FF0D
+           e.g. [BB] [LOCK][CLEAR][COMPLETE] partner=FF0D
+[      8] [BB]                           t=<N> [STATE] SECURE -> HANDSHAKE
+           e.g. [BB] t=94 [STATE] SECURE -> HANDSHAKE
+           e.g. [BB] t=94 [STATE] SECURE -> HANDSHAKE
+[      8] [TIMEOUT]                      CLEAN SLATE - returning to DISCOVERY
+           e.g. t=58 [TIMEOUT] CLEAN SLATE - returning to DISCOVERY
+           e.g. t=58 [TIMEOUT] CLEAN SLATE - returning to DISCOVERY
+[      8] [SINK]                         Boot complete; ready to recruit
+           e.g. t=21 [SINK] Boot complete; ready to recruit
+           e.g. t=21 [SINK] Boot complete; ready to recruit
+[      8] [SINK]                         Recruitment targets (threshold <FLOAT>): <N> nodes
+           e.g. t=21 [SINK] Recruitment targets (threshold 0.95): 9 nodes
+           e.g. t=21 [SINK] Recruitment targets (threshold 0.95): 9 nodes
+[      8] [SINK]                         PARENT_REJECT from <HEX>; trying next candidate
+           e.g. t=50 [SINK] PARENT_REJECT from FF02; trying next candidate
+           e.g. t=50 [SINK] PARENT_REJECT from FF02; trying next candidate
+[      8] [SINK_TIMEOUT]                 Exhausted <N> retries for <HEX> - REJECTED
+           e.g. t=67 [SINK_TIMEOUT] Exhausted 4 retries for FF07 - REJECTED
+           e.g. t=67 [SINK_TIMEOUT] Exhausted 4 retries for FF07 - REJECTED
+[      8] [SINK]                         Recruitment complete; <N> nodes secured
+           e.g. t=84 [SINK] Recruitment complete; 2 nodes secured
+           e.g. t=84 [SINK] Recruitment complete; 2 nodes secured
+[      8] [SINK]                         Terminal: recruitment exhausted; <N> children secured
+           e.g. t=85 [SINK] Terminal: recruitment exhausted; 2 children secured
+           e.g. t=85 [SINK] Terminal: recruitment exhausted; 2 children secured
+[      8] [PANIC_RX]                     sev=<N> from=<HEX> TTL=<N>
+           e.g. t=1102 [PANIC_RX] sev=1 from=0027 TTL=1
+           e.g. t=1104 [PANIC_RX] sev=1 from=FF02 TTL=0
+[      8] [BB]                           t=<HEX> [PARENT] Set parent -> <HEX>
+           e.g. [BB] t=1592 [PARENT] Set parent -> FF0C
+           e.g. [BB] t=1601 [PARENT] Set parent -> FF0C
+[      8] [BB]                           t=<HEX> [PHASE] Inherited phaseOffset=<N> from parent <HEX>
+           e.g. [BB] t=1593 [PHASE] Inherited phaseOffset=0 from parent FF0C
+           e.g. [BB] t=1602 [PHASE] Inherited phaseOffset=0 from parent FF0C
+[      8] [BB]                           t=<HEX> [HANDSHAKE] Lock cleared (was with <HEX>)
+           e.g. [BB] t=1593 [HANDSHAKE] Lock cleared (was with FF0C)
+           e.g. [BB] t=1599 [HANDSHAKE] Lock cleared (was with FF0C)
+[      8] [BB]                           t=<HEX> [HANDSHAKE] <HEX> added to pendingChildren (awaiting ENC_HELLO)
+           e.g. [BB] t=1590 [HANDSHAKE] FF04 added to pendingChildren (awaiting ENC_HELLO)
+           e.g. [BB] t=1599 [HANDSHAKE] FF04 added to pendingChildren (awaiting ENC_HELLO)
+[      8] [BB]                           t=<HEX> [PHASE] Sending phaseOffset=<N> to child <HEX> (self=<N>)
+           e.g. [BB] t=1590 [PHASE] Sending phaseOffset=0 to child FF04 (self=1)
+           e.g. [BB] t=1599 [PHASE] Sending phaseOffset=0 to child FF04 (self=1)
+[      7] [SINK]                         ENC_HELLO from <HEX> (parent=<HEX>): sn=<N> gwCh=[<HEX>] chCh=[<HEX>] 
+           e.g. t=257 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=0 gwCh=[FF03] chCh=[AA09] 
+           e.g. t=257 [SINK] ENC_HELLO from FF01 (parent=FF0D): sn=0 gwCh=[FF03] chCh=[AA09] 
+[      7] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [GRO:<N>]
+           e.g. t=359 [5.2_RX] Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]
+           e.g. t=359 [5.2_RX] Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]
+[      7] [IGNORE]                       CH_ACK from <HEX> (not partner)
+           e.g. t=297 [IGNORE] CH_ACK from FF03 (not partner)
+           e.g. t=297 [IGNORE] CH_ACK from FF03 (not partner)
+[      7] [DVS_EXHAUSTED]                Max scale attempts (<N>) reached - entering DORMANT
+           e.g. t=301 [DVS_EXHAUSTED] Max scale attempts (2) reached - entering DORMANT
+           e.g. t=301 [DVS_EXHAUSTED] Max scale attempts (2) reached - entering DORMANT
+[      6] [RX_FWD]                       Encrypted CMD.<N> from Child <HEX> -> Queue for Parent <BCAST>
+           e.g. t=1626 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent <BCAST>
+           e.g. t=1600 [RX_FWD] Encrypted CMD.5 from Child FF0A -> Queue for Parent <BCAST>
+[      6] [BB]                           t=<HEX> [RX_FWD] Encrypted CMD.<N> from Child <HEX> -> Queue for Parent <BCAST>
+           e.g. [BB] t=1626 [RX_FWD] Encrypted CMD.5 from Child FF03 -> Queue for Parent <BCAST>
+           e.g. [BB] t=1600 [RX_FWD] Encrypted CMD.5 from Child FF0A -> Queue for Parent <BCAST>
+[      6] [ENC_HELLO]                    Retry <N>/<N> sent (next at t=<HEX>)
+           e.g. t=1640 [ENC_HELLO] Retry 1/3 sent (next at t=1660)
+           e.g. t=1660 [ENC_HELLO] Retry 2/3 sent (next at t=1700)
+[      6] [BB]                           t=<HEX> [STATE] SECURE -> HANDSHAKE
+           e.g. [BB] t=1597 [STATE] SECURE -> HANDSHAKE
+           e.g. [BB] t=1606 [STATE] SECURE -> HANDSHAKE
+[      6] [BB]                           t=<HEX> [REJECT] Neighbor <HEX> marked REJECT
+           e.g. [BB] t=1599 [REJECT] Neighbor FF0C marked REJECT
+           e.g. [BB] t=1608 [REJECT] Neighbor FF0C marked REJECT
+[      6] [BB]                           t=<HEX> [STATE] HANDSHAKE -> SECURE
+           e.g. [BB] t=1599 [STATE] HANDSHAKE -> SECURE
+           e.g. [BB] t=1608 [STATE] HANDSHAKE -> SECURE
+[      6] [BB]                           t=<HEX> [ENC_HELLO] Retry <N>/<N> sent (next at t=<HEX>)
+           e.g. [BB] t=1640 [ENC_HELLO] Retry 1/3 sent (next at t=1660)
+           e.g. [BB] t=1660 [ENC_HELLO] Retry 2/3 sent (next at t=1700)
+[      6] [5.2_RX]                       Sensor <HEX> REROUTED to <HEX> (history: <HEX>-><HEX>)
+           e.g. t=1596 [5.2_RX] Sensor FDFC REROUTED to FF04 (history: FF01->FF04)
+           e.g. t=1597 [5.2_RX] Sensor 01FF REROUTED to FF04 (history: FF01->FF04)
+[      5] [5.2_GROUP]                    RSSI Group <N> (GOOD): <N> sensors
+           e.g. t=815 [5.2_GROUP] RSSI Group 2 (GOOD): 0 sensors
+           e.g. t=815 [5.2_GROUP] RSSI Group 2 (GOOD): 0 sensors
+[      5] [5.2_RX]                       Aggregated <N> sensors from <HEX> (via <HEX>) | Groups: [GRO:<N>; GRO:<N>; GOO:<N>; GRO:<N>]
+           e.g. t=815 [5.2_RX] Aggregated 7 sensors from FF01 (via FF01) | Groups: [GRO:0; GRO:3; GOO:0; GRO:98]
+           e.g. t=815 [5.2_RX] Aggregated 7 sensors from FF01 (via FF01) | Groups: [GRO:0; GRO:3; GOO:0; GRO:98]
+[      5] [5.2_RX]                       NEW sensor <HEX> [FAIR] val=<HEX> bat=<N>% rssi=-<N>dBm via <HEX>
+           e.g. t=857 [5.2_RX] NEW sensor 03FF [FAIR] val=2051 bat=1% rssi=-23dBm via FF01
+           e.g. t=857 [5.2_RX] NEW sensor 03FF [FAIR] val=2051 bat=1% rssi=-23dBm via FF01
+[      4] [PANIC_FWD]                    orig=<HEX> val=<N> -> parent TTL=<N>
+           e.g. t=1102 [PANIC_FWD] orig=0027 val=93 -> parent TTL=0
+           e.g. t=1102 [PANIC_FWD] orig=0027 val=93 -> parent TTL=0
+[      4] [PANIC_DROP]                   TTL expired from <HEX>
+           e.g. t=1104 [PANIC_DROP] TTL expired from FF02
+           e.g. t=1104 [PANIC_DROP] TTL expired from FF02
+[      4] [CRITICAL]                     Parent lost
+           e.g. t=1581 [CRITICAL] Parent lost
+           e.g. t=1545 [CRITICAL] Parent lost
+[      2] [BB]                           t=<HEX> [STATE] DISCOVERY -> HANDSHAKE
+           e.g. [BB] t=1587 [STATE] DISCOVERY -> HANDSHAKE
+           e.g. [BB] t=1587 [STATE] DISCOVERY -> HANDSHAKE
+[      2] [BB]                           t=<HEX> [HANDSHAKE] <HEX> promoted to children (ENC_HELLO received)
+           e.g. [BB] t=1635 [HANDSHAKE] FF04 promoted to children (ENC_HELLO received)
+           e.g. [BB] t=1635 [HANDSHAKE] FF04 promoted to children (ENC_HELLO received)

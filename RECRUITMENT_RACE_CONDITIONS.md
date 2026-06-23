@@ -419,3 +419,116 @@ pre-fix ~2500-tick run that produced the `FF06`/`FF0A` asymmetry above
 (600 ticks is too short to exercise the 1500-tick purge window directly,
 so this confirms no regression in normal formation rather than directly
 reproducing the now-fixed purge).
+
+---
+
+## Follow-up pass (2026-06-23): CH-GWN registration rate quantified, one fix attempt, INCONCLUSIVE
+
+A separate request (verifying the ML-IDS pipeline for crashes/data-quality
+after the modularization restructure) found that `sink_dataset.csv`'s
+CH-tier rows -- Normal and Attack alike -- are silently incomplete. This
+section documents that investigation so it isn't re-derived from scratch.
+
+### Confirmed: not an RF/topology problem
+
+A diagnostic (`WSN_Physics.updateConnectivity` on a fresh topology, no
+attack) found **all 20 CHs within 2 hops of a GWN, 13/20 within 1 hop** --
+ruling out geometric isolation as the cause.
+
+### Confirmed mechanism: CH_REQ silently dropped while a GWN's access radio is locked
+
+`Utils/WSN_Radio.m`'s `passesLockFilter` only exempts Type 5 (CH_HELLO) and
+Type 7.5 (ENC_HELLO) unconditionally; Type 6 (CH_CMD, which includes
+CH_REQ) only bypasses `isFromPartner`. A CH_REQ from any *other* CH while
+the GWN's access radio is mid-handshake is dropped at the radio layer
+before it ever reaches `handle_CH_REQ` (`GWN/WSN_Gateway_Messaging.m:1507-1513`)
+-- whose explicit, already-written `CH_REJECT`-when-busy branch is
+therefore dead code in this exact path. Confirmed directly in per-node logs
+(`combined_t0-*.csv`): stuck CHs show a clean `[CH_REQ] -> target` /
+`[LOCK][TIMEOUT]` (CH's own local timeout firing, zero response ever
+received) / `retry=N/5` / `[REJECT] MAX_RETRIES=5` / move-to-next-candidate
+loop, repeating for the life of the run, never once receiving an explicit
+reject.
+
+A second, independent bug compounds this: `msg` is a `WSN_Message handle`
+object, not a struct -- `isfield(msg, 'subtype')` (used in the existing
+Type-7/ENC_HELLO exception on the very next line) always returns `false`
+on object properties, silently no-op'ing that exception too. `isprop()` is
+required. This means the ENC_HELLO lock-bypass exception has likely never
+actually fired via this branch in any prior run of this project, relying
+solely on the `isFromPartner` fallback.
+
+`CH_ACCESS_LOCK_TIMER = 16` exactly matches the observed per-attempt CH
+timeout, and with `CH_MAX_RETRIES=5` that's 80 ticks burned per rejected
+candidate before rotating to the next one; `CH_REJECTED_LIST_RESET_INTERVAL
+= 150` before a previously-rejected GWN is retried.
+
+### Fix attempted: let CH_REQ bypass the lock + partner-priority arbitration boost
+
+Tried: (1) fix `isfield`→`isprop`; (2) let CH_REQ (subtype 0 specifically,
+not the whole CH_CMD family) bypass `passesLockFilter` unconditionally so
+it reaches `handle_CH_REQ`'s real reject logic; (3) since CH_REQ already
+has the *highest* nominal priority on the Access radio (`getPriority`,
+p=3), bypassing the filter risked letting a stranger's CH_REQ win the
+single per-tick `pendingRX` slot over the GWN's actual partner's real
+reply (each radio is strictly half-duplex, one action per tick) -- so
+added `getEffectivePriority()`, a +1000 priority boost for any message
+from the current `handshakePartner`, guaranteeing partner traffic always
+wins arbitration regardless of nominal type priority.
+
+**First A/B attempt (CH_REQ bypass alone, isfield bug still present so the
+bypass condition was *also* dead) measured WORSE**: same-seed controlled
+test, 4/20 registered vs. an 8/20 baseline. Root cause: removing the lock
+filter's protection let stranger CH_REQ traffic compete for the GWN's
+single per-tick TX/RX slot against its actual partner's reply, starving
+real handshakes in progress -- worse than the silent drop it replaced.
+
+**Second attempt (isprop fix + bypass + partner-priority boost), tested
+across 5 seeds (42, 7, 1, 99, 555), nets to exactly zero aggregate effect**:
+
+| Seed | Baseline | With fix | Δ |
+|---|---|---|---|
+| 42 | 8/20 | 10/20 | +2 |
+| 7 | 12/20 | 9/20 | −3 |
+| 1 | 5/20 | 2/20 | −3 |
+| 99 | 7/20 | 7/20 | 0 |
+| 555 | 4/20 | 8/20 | +4 |
+| **Total** | **36/100** | **36/100** | **0** |
+
+Per-seed variance (4-12 out of 20, a 3x spread) dwarfs the fix's effect in
+either direction. **This fix was reverted** (working tree is back to
+`d31ef5e`, nothing committed) rather than left in an unproven state.
+
+A qualitative spot-check (early-window logs, `combined_t0-250/500_*.csv`,
+fix applied) shows the underlying mechanism *can* work cleanly -- a CH that
+burned all 5 retries against one busy GWN (`t=266`→`t=350`, blind timeouts,
+zero responses received even with the fix applied) succeeded on its very
+next attempt against a different GWN (`t=355` CH_REQ → `t=358` CH_ACK
+received, handshake closed). This suggests the **first-contact GWN(s) are
+genuinely saturated during the initial post-warmup land-rush** (many CHs
+activating and targeting the same nearby, RSSI-strongest GWN(s)
+simultaneously) rather than every CH being permanently stuck -- consistent
+with roughly half eventually succeeding within 1500 ticks and half not.
+
+**Two confounds for whoever picks this up next:**
+1. **Same-seed `rng()` comparisons are noisier than they look.** Once two
+   code paths diverge in which random draws they consume (e.g. a CH_REQ
+   that previously never reached `handle_CH_REQ` now conditionally calls
+   `generatePasskeyForCH`, which can call `randi()`), the entire downstream
+   random sequence for the rest of that run diverges too -- a fixed seed
+   does not guarantee a clean, isolated comparison once behavior differs.
+   Use many more seeds (10-20+) and compare aggregate distributions, not
+   single-seed deltas.
+2. The `isfield`→`isprop` correction is independently a real, narrowly-
+   scoped bug fix (the ENC_HELLO exception has silently never worked via
+   this branch) and is very likely safe to apply on its own merits,
+   separate from the CH_REQ-bypass/priority-boost experiment above, which
+   was not isolated and tested alone due to time constraints this session.
+
+**Recommended next step, not started**: a proper per-GWN pending-request
+queue (bounded, e.g. size 3-5) instead of the single-lock-slot-and-drop
+model, with the GWN proactively re-engaging the next queued requester once
+its current handshake clears, rather than relying on the requester's blind
+16-tick local timeout-and-rotate. This is a real protocol change (new
+queue-management state, expiry handling for requesters who gave up and
+moved on), not a one-line fix -- scope it as its own session.

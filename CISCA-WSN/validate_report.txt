@@ -1,0 +1,45 @@
+Parsed 804233 rows from 8 chunks in 32.56s (24701 rows/s)
+t_inferred rows: 6525 (0.81%)
+
+=== Per-tag fullmatch failure check (regex matched the WHOLE rest string?) ===
+  5.2_RX: 5063/7757 did NOT fullmatch
+      e.g. 'Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]'
+      e.g. 'Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]'
+      e.g. 'Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]'
+      e.g. 'Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]'
+      e.g. 'Aggregated 0 sensors from FF01 (via FF01) | Groups: [GRO:0]'
+  LOCK: 0/6478 did NOT fullmatch
+  DROP.LOCK: 0/47 did NOT fullmatch
+
+TOTAL fullmatch failures across all patterned tags: 5063
+
+=== Tags with NO registered pattern (raw rest text only) ===
+tag
+TERMINAL           23433
+5.2_RETRY          11014
+5.2_FRAG            9926
+5.2_GROUP           6310
+5.2_PARSE           4273
+5.2_MERGE           2694
+5.2_SKIP             806
+5.2_TOKEN            740
+PHASE                224
+SCALE_EXHAUSTED      208
+RETRY                 72
+DVS                   71
+CH_INFO               47
+PURGE                 38
+ORPHAN_DETECT         14
+IGNORE                 7
+DVS_EXHAUSTED          7
+
+=== node_type x channel row counts (post-dedup) ===
+node_type  channel 
+CH         UNIFIED      69755
+GWN        ACCESS       40249
+           BACKBONE    253800
+           UNIFIED      55972
+SENSOR     UNIFIED     359113
+SINK       ACCESS         272
+           BACKBONE      3788
+           UNIFIED      21284
